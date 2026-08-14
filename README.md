@@ -5,11 +5,11 @@
 <h1 align="center">tunnel</h1>
 
 <p align="center">
-  <a href="https://github.com/pangxincheng/remote-agent/actions/workflows/release.yml">
-  <img src="https://github.com/pangxincheng/remote-agent/actions/workflows/release.yml/badge.svg?style=flat-square" alt="release">
+  <a href="https://github.com/pangxincheng/tunnel/actions/workflows/release.yml">
+  <img src="https://github.com/pangxincheng/tunnel/actions/workflows/release.yml/badge.svg?style=flat-square" alt="release">
   </a>
-  <a href="https://github.com/pangxincheng/remote-agent/releases"><img src="https://img.shields.io/github/v/release/pangxincheng/remote-agent?style=flat-square" alt="release version"></a>
-  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/pangxincheng/remote-agent?style=flat-square" alt="go version"></a>
+  <a href="https://github.com/pangxincheng/tunnel/releases"><img src="https://img.shields.io/github/v/release/pangxincheng/tunnel?style=flat-square" alt="release version"></a>
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/pangxincheng/tunnel?style=flat-square" alt="go version"></a>
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License">
 
 </p>
@@ -44,7 +44,7 @@
 需要 Go ≥ 1.22:
 
 ```bash
-git clone <仓库地址> && cd remote-agent
+git clone <仓库地址> && cd tunnel
 mkdir -p dist && go build -o dist/tunnel ./cmd/tunnel
 
 # 运行测试(不依赖真实 VPS,内置进程内测试 SSH 服务器)
