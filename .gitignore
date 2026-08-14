@@ -1,2 +1,3 @@
-/tunnel
+# 编译产物(本仓库的构建输出统一放 /tmp 或 dist/)
+/dist/
 *.test
