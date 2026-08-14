@@ -42,6 +42,16 @@ func main() {
 	}
 }
 
+// 端口默认值集中定义:
+//   defaultRemoteListenPort  VPS loopback 汇合端口(server/client 两侧默认一致)
+//   defaultServerTargetPort  server 的 --local-ssh-port(内网 sshd)
+//   defaultClientListenPort  client 的 --local-ssh-port(本机监听,与汇合端口同值便于记忆)
+const (
+	defaultRemoteListenPort  = 5102
+	defaultServerTargetPort  = 22
+	defaultClientListenPort  = defaultRemoteListenPort
+)
+
 // findConfigPath 预扫描参数里的 -c/--config(分离与 = 两种写法);
 // 未指定且 ./tunnel.toml 存在时自动使用。
 func findConfigPath(args []string) string {
@@ -102,7 +112,7 @@ func commonFlags(fc *tunnel.FileConfig) []cli.Flag {
 
 // portFlags 生成两个端口 flag,默认值随子命令角色与配置文件。
 func portFlags(fc *tunnel.FileConfig, defaultLocal int) []cli.Flag {
-	lsp, rlp := defaultLocal, 5102
+	lsp, rlp := defaultLocal, defaultRemoteListenPort
 	if fc.LocalSSHPort != 0 {
 		lsp = fc.LocalSSHPort
 	}
@@ -143,7 +153,7 @@ func serverCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "server",
 		Usage: "内网侧守护:反向转发(VPS loopback:PORT → 内网 sshd)",
-		Flags: append(commonFlags(fc), portFlags(fc, 22)...),
+		Flags: append(commonFlags(fc), portFlags(fc, defaultServerTargetPort)...),
 		Action: func(_ context.Context, cmd *cli.Command) error {
 			cfg, err := buildConfig(cmd)
 			if err != nil {
@@ -162,7 +172,7 @@ func clientCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "client",
 		Usage: "客户端守护:正向转发(本机 LISTEN → VPS loopback:PORT)",
-		Flags: append(commonFlags(fc), portFlags(fc, 5102)...),
+		Flags: append(commonFlags(fc), portFlags(fc, defaultClientListenPort)...),
 		Action: func(_ context.Context, cmd *cli.Command) error {
 			cfg, err := buildConfig(cmd)
 			if err != nil {
