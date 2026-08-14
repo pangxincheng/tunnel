@@ -109,16 +109,15 @@ cfg := &tunnel.Config{
     HostPub: "ssh-ed25519 AAAA…",  // 内联主机公钥
 }
 
-// establish 是一个闭包:调用 ReverseForward 或 LocalForward,
-// 把它们的额外参数捕获进去,适配成 func(*ssh.Client) (net.Listener, error)。
-c := tunnel.NewClient(cfg, func(sc *ssh.Client) (net.Listener, error) {
-    // 正向转发(client 方向;LocalForward 内置 accept 循环):
-    return tunnel.LocalForward(sc, "127.0.0.1:5102", "127.0.0.1:5102")
-})
+// 正向转发(client 方向):本机 5102 ← VPS loopback 5102
+c := tunnel.NewClient(cfg, tunnel.LocalForwarder("127.0.0.1:5102", "127.0.0.1:5102"))
 c.Run(ctx) // 守护:keepalive + 退避重连
+
+// 反向转发(server 方向):VPS loopback 5102 → 内网 127.0.0.1:22
+// tunnel.NewClient(cfg, tunnel.ReverseForwarder("127.0.0.1", 5102, "127.0.0.1:22"))
 ```
 
-反向转发(server 方向)用 `tunnel.ReverseForward`,其返回的 listener 需要调用方自行 `Accept` 并交给 `tunnel.ProxyToLocal`(参考 `cmd/tunnel/main.go` 的 cmdServer)。
+`ReverseForwarder`/`LocalForwarder` 工厂已内置 accept/代理循环,开箱即用;更底层的 `ReverseForward`/`LocalForward`(只建 listener)也保留,供需要自定义代理逻辑的场景。
 
 经 `gomobile bind` 编译即可供 iOS/Android 调用。
 

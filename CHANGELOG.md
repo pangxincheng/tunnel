@@ -13,6 +13,7 @@
 - 新增 `tunnel version` 子命令(版本常量 `tunnel.Version = 0.1.0` 位于库层,移动端可共享);usage 文案更新为子命令说明 + 公共参数 + 完整使用示例。
 - 修复 .gitignore:`/tunnel` 规则在库迁入 `tunnel/` 目录后误伤源码,导致 `configfile.go`/`configfile_test.go`/`version.go` 三个新文件此前未被提交(已跟踪文件不受影响所以本地一切正常);移除该规则并补提交。
 - 新增 `README.md`(架构图、编译、server/client 使用、TOML 配置、库/gomobile 用法、安全说明)与 MIT `LICENSE`。
+- 新增 `tunnel/forwarders.go`:`ReverseForwarder`/`LocalForwarder` 工厂 —— 把 listener 创建与 accept/代理循环封装为可直接传给 `NewClient` 的 establish 闭包,调用方(CLI/移动端)不再手写胶水;CLI 改用工厂,README 库示例同步简化。
 
 
 ## 2026-08-14(修订 2)

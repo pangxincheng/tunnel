@@ -18,14 +18,11 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
-
-	"golang.org/x/crypto/ssh"
 
 	"remote-agent/tunnel"
 )
@@ -207,25 +204,9 @@ func cmdServer(args []string) error {
 	}
 	local := fmt.Sprintf("127.0.0.1:%d", *lsp)
 
-	// establish 闭包(反向转发策略):每条 SSH 连接建立后,
-	// 请求 VPS sshd 在 loopback:PORT 监听,每条外部连接代理到内网 sshd。
-	// 重连时监督循环重新调用本闭包,转发随新连接复活。
-	c := tunnel.NewClient(cfg, func(sc *ssh.Client) (net.Listener, error) {
-		l, err := tunnel.ReverseForward(sc, "127.0.0.1", *rlp, local)
-		if err != nil {
-			return nil, err
-		}
-		go func() {
-			for {
-				remote, err := l.Accept()
-				if err != nil {
-					return // 监听器随连接断开失效,重连由监督循环负责
-				}
-				go tunnel.ProxyToLocal(remote, local)
-			}
-		}()
-		return l, nil
-	})
+	// 反向转发策略由库工厂直接给出(含 accept/代理循环);
+	// 重连时监督循环重新调用,转发随新连接复活。
+	c := tunnel.NewClient(cfg, tunnel.ReverseForwarder("127.0.0.1", *rlp, local))
 	ctx, stop := signalCtx()
 	defer stop()
 	return c.Run(ctx)
@@ -256,12 +237,8 @@ func cmdClient(args []string) error {
 	}
 	target := fmt.Sprintf("127.0.0.1:%d", *rlp)
 
-	// establish 闭包(正向转发策略):本机监听,每条连接经
-	// direct-tcpip 通道请 VPS 代连汇合端口。LocalForward 内部
-	// 自带 accept/代理循环,无需外层再 Accept。
-	c := tunnel.NewClient(cfg, func(sc *ssh.Client) (net.Listener, error) {
-		return tunnel.LocalForward(sc, fmt.Sprintf("127.0.0.1:%d", *lsp), target)
-	})
+	// 正向转发策略由库工厂直接给出。
+	c := tunnel.NewClient(cfg, tunnel.LocalForwarder(fmt.Sprintf("127.0.0.1:%d", *lsp), target))
 	ctx, stop := signalCtx()
 	defer stop()
 	return c.Run(ctx)
