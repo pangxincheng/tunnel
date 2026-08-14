@@ -20,7 +20,7 @@
 - 端口默认值收敛为常量:`defaultRemoteListenPort=5102`、`defaultServerTargetPort=22`、`defaultClientListenPort=5102`,消除散落的魔法数字。
 - CLI 参数解析最终定稿为 docopt(参照 pTunnel):usage 文本即语法定义,合并规则 flag > TOML > 内置默认;`--remote-listen-port` 无默认值(部署决策必填),client 的 `--local-ssh-port` 默认跟随汇合端口;移除 urfave/cli 依赖。
 - 修复 README 编译命令:二进制输出改为 `dist/tunnel`(根目录 `./tunnel` 与库源码目录冲突)。
-- 新增 GitHub Actions 发布工作流(`.github/workflows/release.yml`):推送 `v*` tag 触发 → 测试 → linux/windows/darwin × amd64/arm64 六平台交叉编译(`CGO_ENABLED=0`、`-trimpath`、`-ldflags` 注入版本)→ tar.gz/zip 打包 → 自动创建 GitHub Release;`tunnel.Version` 由 const 改为 var 以支持注入(默认 "dev")。
+- 新增 GitHub Actions 发布工作流(`.github/workflows/release.yml`):推送 `v*` tag 触发 → 测试 → linux/windows/darwin × amd64/arm64 六平台交叉编译(`CGO_ENABLED=0`、`-trimpath`、`-ldflags` 注入版本)→ 打包(含 `tunnel.toml.example` 与 `LICENSE`)→ 自动创建 GitHub Release;`tunnel.Version` 由 const 改为 var 以支持注入(默认 "dev")。
 
 
 ## 2026-08-14(修订 2)

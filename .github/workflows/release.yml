@@ -48,14 +48,15 @@ jobs:
           go build -trimpath -ldflags "-s -w -X remote-agent/tunnel.Version=$VERSION" \
             -o "dist/$BIN" ./cmd/tunnel
 
-      - name: 打包
+      - name: 打包(含配置样例与许可证)
         run: |
+          cp tunnel.toml.example LICENSE dist/
           cd dist
           NAME=tunnel_${GITHUB_REF_NAME}_${GOOS}_${GOARCH}
           if [ "$GOOS" = "windows" ]; then
-            zip "${NAME}.zip" tunnel.exe
+            zip "${NAME}.zip" tunnel.exe tunnel.toml.example LICENSE
           else
-            tar czf "${NAME}.tar.gz" tunnel
+            tar czf "${NAME}.tar.gz" tunnel tunnel.toml.example LICENSE
           fi
         env:
           GOOS: ${{ matrix.goos }}
