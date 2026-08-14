@@ -15,7 +15,7 @@ func TestClientReconnectsAfterServerDrop(t *testing.T) {
 		SSHAddr: server.Addr(), User: "u", KeyPath: privPath,
 		HostPub: writeHostPub(t, server.HostKey),
 	}
-	c := NewClient(cfg, ReverseForward("127.0.0.1", 0, echo))
+	c := NewClient(cfg, ReverseForward("127.0.0.1:0", echo))
 	c.keepaliveInterval = 50 * time.Millisecond
 	c.reconnectMin = 10 * time.Millisecond
 

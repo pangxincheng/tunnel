@@ -47,7 +47,7 @@ func TestReverseForwardEndToEnd(t *testing.T) {
 	}
 	defer client.Close()
 
-	listener, err := ReverseForward("127.0.0.1", 0, echo)(client)
+	listener, err := ReverseForward("127.0.0.1:0", echo)(client)
 	if err != nil {
 		t.Fatalf("ReverseForward: %v", err)
 	}
