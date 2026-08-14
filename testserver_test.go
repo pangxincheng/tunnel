@@ -193,7 +193,7 @@ func (s *testSSHServer) handleChannel(conn *ssh.ServerConn, ch ssh.NewChannel) {
 		ch.Reject(ssh.ConnectionFailed, "bad payload")
 		return
 	}
-	target, err := net.Dial("tcp", fmt.Sprintf("%s:%d", p.DestAddr, p.DestPort))
+	target, err := net.Dial("tcp", net.JoinHostPort(p.DestAddr, fmt.Sprint(p.DestPort)))
 	if err != nil {
 		ch.Reject(ssh.ConnectionFailed, err.Error())
 		return
