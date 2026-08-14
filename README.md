@@ -5,10 +5,13 @@
 <h1 align="center">tunnel</h1>
 
 <p align="center">
-  <a href="https://github.com/pangxincheng/remote-agent/actions/workflows/release.yml"><img src="https://github.com/pangxincheng/remote-agent/actions/workflows/release.yml/badge.svg" alt="release"></a>
-  <a href="https://github.com/pangxincheng/remote-agent/releases"><img src="https://img.shields.io/github/v/release/pangxincheng/remote-agent" alt="release version"></a>
-  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/pangxincheng/remote-agent" alt="go version"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="license"></a>
+  <a href="https://github.com/pangxincheng/remote-agent/actions/workflows/release.yml">
+  <img src="https://github.com/pangxincheng/remote-agent/actions/workflows/release.yml/badge.svg?style=flat-square" alt="release">
+  </a>
+  <a href="https://github.com/pangxincheng/remote-agent/releases"><img src="https://img.shields.io/github/v/release/pangxincheng/remote-agent?style=flat-square" alt="release version"></a>
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/pangxincheng/remote-agent?style=flat-square" alt="go version"></a>
+  <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License">
+
 </p>
 
 通用 SSH 端口转发工具/库。把内网机器的 SSH 服务安全地暴露出来 —— 公网 VPS 上**只需一个 sshd**,不需要部署任何自研服务端。
@@ -113,7 +116,7 @@ tunnel client --local-ssh-port 9999   # flag 覆盖配置
 ## 作为库使用(移动端)
 
 ```go
-import "remote-agent/tunnel"
+import "github.com/pangxincheng/tunnel/tunnel"
 
 cfg := &tunnel.Config{
     SSHAddr: "vps.example.com:22",

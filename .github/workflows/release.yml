@@ -45,7 +45,7 @@ jobs:
           BIN=tunnel
           if [ "$GOOS" = "windows" ]; then BIN=tunnel.exe; fi
           mkdir -p dist
-          go build -trimpath -ldflags "-s -w -X remote-agent/tunnel.Version=$VERSION" \
+          go build -trimpath -ldflags "-s -w -X github.com/pangxincheng/tunnel/tunnel.Version=$VERSION" \
             -o "dist/$BIN" ./cmd/tunnel
 
       - name: 打包(含配置样例与许可证)

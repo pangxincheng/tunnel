@@ -1,4 +1,4 @@
-module remote-agent
+module github.com/pangxincheng/tunnel
 
 go 1.25.5
 

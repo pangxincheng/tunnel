@@ -1,4 +1,4 @@
-// tunnel CLI:库包 remote-agent/tunnel 的薄壳(docopt 实现,与 pTunnel 同款)。
+// tunnel CLI:库包 github.com/pangxincheng/tunnel/tunnel 的薄壳(docopt 实现,与 pTunnel 同款)。
 //
 // 子命令:
 //
@@ -23,7 +23,7 @@ import (
 
 	"github.com/docopt/docopt-go"
 
-	"remote-agent/tunnel"
+	"github.com/pangxincheng/tunnel/tunnel"
 )
 
 const usageText = `tunnel —— 通用 SSH 端口转发工具(反向/正向转发,断线自动重连)
