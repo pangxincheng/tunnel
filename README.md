@@ -44,7 +44,7 @@
 需要 Go ≥ 1.22:
 
 ```bash
-git clone <仓库地址> && cd tunnel
+git clone https://github.com/pangxincheng/tunnel.git && cd tunnel
 mkdir -p dist && go build -o dist/tunnel ./cmd/tunnel
 
 # 运行测试(不依赖真实 VPS,内置进程内测试 SSH 服务器)
