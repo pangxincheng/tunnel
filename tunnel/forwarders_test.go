@@ -7,9 +7,33 @@ import (
 	"testing"
 )
 
-// TestReverseForwarderEndToEnd 验证工厂返回的闭包开箱即用:
+// startEchoServer 模拟内网服务:回显一行。
+func startEchoServer(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				line, _ := bufio.NewReader(c).ReadString('\n')
+				fmt.Fprintf(c, "echo: %s", line)
+			}()
+		}
+	}()
+	return l.Addr().String()
+}
+
+// TestReverseForwardEndToEnd 验证工厂返回的闭包开箱即用:
 // 不需要调用方再写 accept/代理循环。
-func TestReverseForwarderEndToEnd(t *testing.T) {
+func TestReverseForwardEndToEnd(t *testing.T) {
 	privPath, pub := writeClientKey(t)
 	server := startTestSSHServer(t, pub)
 	echo := startEchoServer(t)
@@ -23,9 +47,9 @@ func TestReverseForwarderEndToEnd(t *testing.T) {
 	}
 	defer client.Close()
 
-	listener, err := ReverseForwarder("127.0.0.1", 0, echo)(client)
+	listener, err := ReverseForward("127.0.0.1", 0, echo)(client)
 	if err != nil {
-		t.Fatalf("ReverseForwarder: %v", err)
+		t.Fatalf("ReverseForward: %v", err)
 	}
 	defer listener.Close()
 
@@ -41,7 +65,7 @@ func TestReverseForwarderEndToEnd(t *testing.T) {
 	}
 }
 
-func TestLocalForwarderEndToEnd(t *testing.T) {
+func TestLocalForwardEndToEnd(t *testing.T) {
 	privPath, pub := writeClientKey(t)
 	server := startTestSSHServer(t, pub)
 	echo := startEchoServer(t)
@@ -55,9 +79,9 @@ func TestLocalForwarderEndToEnd(t *testing.T) {
 	}
 	defer client.Close()
 
-	listener, err := LocalForwarder("127.0.0.1:0", echo)(client)
+	listener, err := LocalForward("127.0.0.1:0", echo)(client)
 	if err != nil {
-		t.Fatalf("LocalForwarder: %v", err)
+		t.Fatalf("LocalForward: %v", err)
 	}
 	defer listener.Close()
 

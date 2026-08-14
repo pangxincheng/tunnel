@@ -110,14 +110,14 @@ cfg := &tunnel.Config{
 }
 
 // 正向转发(client 方向):本机 5102 ← VPS loopback 5102
-c := tunnel.NewClient(cfg, tunnel.LocalForwarder("127.0.0.1:5102", "127.0.0.1:5102"))
+c := tunnel.NewClient(cfg, tunnel.LocalForward("127.0.0.1:5102", "127.0.0.1:5102"))
 c.Run(ctx) // 守护:keepalive + 退避重连
 
 // 反向转发(server 方向):VPS loopback 5102 → 内网 127.0.0.1:22
-// tunnel.NewClient(cfg, tunnel.ReverseForwarder("127.0.0.1", 5102, "127.0.0.1:22"))
+// tunnel.NewClient(cfg, tunnel.ReverseForward("127.0.0.1", 5102, "127.0.0.1:22"))
 ```
 
-`ReverseForwarder`/`LocalForwarder` 工厂已内置 accept/代理循环,开箱即用;更底层的 `ReverseForward`/`LocalForward`(只建 listener)也保留,供需要自定义代理逻辑的场景。
+`ReverseForward`/`LocalForward` 工厂已内置 listener 创建与 accept/代理循环,开箱即用。
 
 经 `gomobile bind` 编译即可供 iOS/Android 调用。
 

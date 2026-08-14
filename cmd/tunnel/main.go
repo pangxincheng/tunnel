@@ -206,7 +206,7 @@ func cmdServer(args []string) error {
 
 	// 反向转发策略由库工厂直接给出(含 accept/代理循环);
 	// 重连时监督循环重新调用,转发随新连接复活。
-	c := tunnel.NewClient(cfg, tunnel.ReverseForwarder("127.0.0.1", *rlp, local))
+	c := tunnel.NewClient(cfg, tunnel.ReverseForward("127.0.0.1", *rlp, local))
 	ctx, stop := signalCtx()
 	defer stop()
 	return c.Run(ctx)
@@ -238,7 +238,7 @@ func cmdClient(args []string) error {
 	target := fmt.Sprintf("127.0.0.1:%d", *rlp)
 
 	// 正向转发策略由库工厂直接给出。
-	c := tunnel.NewClient(cfg, tunnel.LocalForwarder(fmt.Sprintf("127.0.0.1:%d", *lsp), target))
+	c := tunnel.NewClient(cfg, tunnel.LocalForward(fmt.Sprintf("127.0.0.1:%d", *lsp), target))
 	ctx, stop := signalCtx()
 	defer stop()
 	return c.Run(ctx)

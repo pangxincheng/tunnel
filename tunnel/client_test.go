@@ -2,11 +2,8 @@ package tunnel
 
 import (
 	"context"
-	"net"
 	"testing"
 	"time"
-
-	"golang.org/x/crypto/ssh"
 )
 
 func TestClientReconnectsAfterServerDrop(t *testing.T) {
@@ -18,22 +15,7 @@ func TestClientReconnectsAfterServerDrop(t *testing.T) {
 		SSHAddr: server.Addr(), User: "u", KeyPath: privPath,
 		HostPub: writeHostPub(t, server.HostKey),
 	}
-	c := NewClient(cfg, func(sc *ssh.Client) (net.Listener, error) {
-		l, err := ReverseForward(sc, "127.0.0.1", 0, echo)
-		if err != nil {
-			return nil, err
-		}
-		go func() {
-			for {
-				remote, err := l.Accept()
-				if err != nil {
-					return
-				}
-				go ProxyToLocal(remote, echo)
-			}
-		}()
-		return l, nil
-	})
+	c := NewClient(cfg, ReverseForward("127.0.0.1", 0, echo))
 	c.keepaliveInterval = 50 * time.Millisecond
 	c.reconnectMin = 10 * time.Millisecond
 
