@@ -1,96 +1,102 @@
 # tunnel · 设计文档
 
-日期:2026-08-14
+日期:2026-08-14(修订:实现路线改为 ssh 编排器)
 状态:已评审
 
-通用 SSH 端口转发工具。单 binary 双子命令:`tunnel server`(内网侧反向转发)与 `tunnel client`(客户端侧正向转发)。组合效果:客户端 SSH 到本地监听端口即落到内网 sshd,公网 VPS 只暴露一个 SSH 端口。
+通用 SSH 端口转发工具。单 binary 双子命令:`tunnel server`(内网侧反向转发守护)与 `tunnel client`(客户端接入)。组合效果:客户端一条命令登进内网 sshd,公网 VPS 只暴露一个 SSH 端口。
 
 ## 1. 范围
 
-**做**:一条端口映射(VPS loopback:PORT ↔ 内网单个本地地址);私钥认证 + 主机公钥钉住;keepalive 探活 + 指数退避重连;TOML 配置 + flag 覆盖。
+**做**:一条端口映射(VPS loopback:PORT ↔ 内网 sshd);server 守护(掉线退避重连);client 交互登录与 `-N` 守护两种模式;纯 flags + ssh_cmd 透传。
 
-**不做**:多映射、公网直连模式(`--remote-bind 0.0.0.0` 虽保留 flag 但非主场景)、配置文件热加载、Web 管理端、终端复用(ra/rad 已从仓库范围移除)。
+**不做**:自研 SSH 协议栈(2026-08-14 修订:全部交还给系统 ssh)、配置文件(参数已足够少)、多映射、公网直连模式、终端复用。
 
-## 2. 架构与链路
+## 2. 实现路线:ssh 编排器
+
+tunnel **不包含任何 SSH 协议逻辑**,只做两件事:**参数组装**(把意图翻译成正确的 ssh 命令行)与**进程监督**(保活、掉线重连)。认证、加密、known_hosts 校验、心跳、字节代理全部归还给系统 OpenSSH 客户端。
+
+带来的性质:
+
+- 用户的认证方式(密钥/agent/密码)、TOFU 确认、`-o` 自定义选项原样生效 —— 零适配成本
+- 主机公钥校验由 ssh 的 known_hosts 负责(标准 TOFU 模型,交互可见)
+- 假死发现用 ssh 原生的 `ServerAliveInterval/ServerAliveCountMax`,转发失败用 `ExitOnForwardFailure=yes` 立即暴露
+
+## 3. 架构与链路
 
 ```
 内网服务器                          公网 VPS(仅暴露 :22)
 ┌──────────────────┐         ┌──────────────────────┐
 │ sshd :22         │         │ sshd                 │
 │   ▲              │         │  ├─ :22(SSH 接入)     │
-│   │ reverse fwd  │         │  └─ localhost:PORT    │
-│ tunnel server ───┼─SSH────►│    (反向转发,仅 loopback)│
+│   │  -R 反向转发  │         │  └─ localhost:PORT    │
+│ tunnel server ───┼─ssh────►│    (默认仅 loopback)  │
 └──────────────────┘         └──────────▲───────────┘
-                                        │ direct-tcpip(经 SSH 通道)
+                                        │ -L / direct-tcpip
                               ┌─────────┴──────────┐
                               │ tunnel client      │
-                              │  本地 :LISTEN 监听  │
+                              │  外层转发 + 内层登录 │
                               └────────────────────┘
-客户端: ssh -p LISTEN user@127.0.0.1 → 落到内网 sshd:22
 ```
 
-- `tunnel server`:经 SSH 向 VPS sshd 请求 `tcpip-forward`(绑定 loopback),把 VPS localhost:PORT 的每个连接代理到内网 LOCAL(默认 `127.0.0.1:22`)
-- `tunnel client`:本地监听 LISTEN,每个连接经 SSH `direct-tcpip` 通道请 VPS sshd 代连 localhost:PORT
-- VPS 侧只是配置好的 sshd(建议纯转发低权限账户、仅密钥登录),零自研服务端
-- 安全:私钥认证;主机公钥钉住(逐字节比对 + 算法收敛到钉住类型,无 TOFU);两段 SSH 上层的应用流量(如客户端到内网的 ssh)对 VPS 不可见
-
-## 3. 命令接口
+## 4. 命令接口
 
 ```bash
-tunnel server [-c tunnel.toml] [--ssh-ip IP] [--ssh-port 22] [--ssh-user USER]
-              [--ssh-key PATH] [--host-pub PATH] [--port 5102]
-              [--local 127.0.0.1:22] [--remote-bind 127.0.0.1]
+tunnel server [--local-ssh-port 22] [--remote-listen-port 5102] -- <ssh_cmd...>
 
-tunnel client [-c tunnel.toml] [--ssh-ip IP] [--ssh-port 22] [--ssh-user USER]
-              [--ssh-key PATH] [--host-pub PATH] [--port 5102]
-              [--listen 127.0.0.1:5102]
+tunnel client [--remote-listen-port 5102] [--remote-listen-user $USER] -- <ssh_cmd...>
+
+tunnel client -N [--listen 127.0.0.1:5102] [--remote-listen-port 5102] -- <ssh_cmd...>
 ```
 
-同名 flag 覆盖配置文件值;未给 `-c` 时读取默认路径 `./tunnel.toml`(不存在则纯 flag)。
+- `ssh_cmd`:完整的 ssh 参数(如 `ssh -p 22 ubuntu@1.2.3.4` 去掉开头的 `ssh`),**原样透传、零解析**;tunnel 只在前面拼接自己计算的转发/选项参数
+- `--local-ssh-port`:内网 sshd 端口(server 转发目标)
+- `--remote-listen-port`:VPS loopback 上的汇合端口,server/client 必须一致
+- `--remote-listen-user`:内网 sshd 的登录用户(client 交互模式内层登录用)
+- `--listen`:client `-N` 模式的本机监听地址
 
-## 4. 配置文件(TOML)
+### server 翻译结果
 
-```toml
-ssh_ip = "vps.example.com"
-ssh_port = 22
-ssh_user = "tunnel"
-ssh_key = "~/.ssh/id_ed25519"
-host_pub = "~/.ssh/vps_host.pub"   # 钉住 VPS 主机公钥
-
-# server 侧
-port = 5102                        # VPS loopback 监听端口
-local = "127.0.0.1:22"             # 内网转发目标
-remote_bind = "127.0.0.1"          # VPS 侧绑定地址
-
-# client 侧
-listen = "127.0.0.1:5102"          # 客户端本地监听
+```bash
+ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+    -R <remote-listen-port>:127.0.0.1:<local-ssh-port> <ssh_cmd...>
 ```
 
-server/client 各取所需字段。必填:`ssh_ip`、`ssh_user`、`ssh_key`、`host_pub`、`port`。`~` 路径展开。
+监督:进程退出 → 指数退避(1s→30s,稳定 60s 归零)→ 重连;Ctrl-C 杀掉 ssh 子进程后退出。
 
-## 5. 关键决策
+### client 交互模式翻译结果
 
-1. **VPS 侧默认绑 loopback**:反向转发公网不可见,客户端必须走 SSH 跳板(`tunnel client`),公网攻击面 = VPS 的 22 端口
-2. **单映射**:一个进程一条映射;多条就开多个进程(配多个配置文件)
-3. **重连语义**:断线(含 keepalive 发现的对端假死)→ 退避 1s→30s(±20% 抖动)→ 重连;连接稳定 60s 退避归零;Ctrl-C 优雅退出
-4. **主机公钥不匹配 = 拒绝**:打印期望指纹,不自动放行;算法收敛到钉住公钥类型(x/crypto 默认偏好 ECDSA 先于 Ed25519,不限定会误判)
+```bash
+# ① 外层(后台):
+ssh -N -o ExitOnForwardFailure=yes -L <remote-listen-port>:127.0.0.1:<remote-listen-port> <ssh_cmd...>
+# ② 外层端口就绪后,内层(前台,交互):
+ssh -p <remote-listen-port> <remote-listen-user>@127.0.0.1
+```
 
-## 6. 错误处理
+内层退出 → 杀掉外层 → 退出。**不重连**(交互会话状态续不上,重连是假象)。
+
+### client -N 守护模式翻译结果
+
+```bash
+ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+    -L <listen-port>:127.0.0.1:<remote-listen-port> <ssh_cmd...>
+```
+
+监督逻辑与 server 相同(退避重连)。
+
+## 5. 错误处理
 
 | 场景 | 行为 |
 |---|---|
-| 缺必填配置 | 启动即报错退出,指出缺哪项 |
-| 私钥/主机公钥文件不可读或解析失败 | 启动即报错 |
-| 拨号失败 / VPS 端口被占 / 转发建立失败 | 退避重连 |
-| 连接断开(TCP 层或 keepalive 探测失败) | 退避重连;稳定 60s 退避归零 |
-| 主机公钥不匹配 | 拒绝连接,打印期望指纹;同样走退避重连(不静默放行) |
-| SIGINT/SIGTERM | 主动断开 SSH 连接,优雅退出 |
+| 参数缺失/无法解析 | 打印用法,退出码 2 |
+| 系统无 `ssh` 可执行文件 | 启动报错 |
+| 首次连接 TOFU 确认 | ssh 原生交互提示,原样呈现 |
+| VPS 端口被占 / 认证失败 | ssh 立即退出(ExitOnForwardFailure),server/-N 模式退避重连;client 交互模式报错退出 |
+| 连接假死 | ServerAlive 超时,ssh 自行退出,进入重连 |
+| client 交互模式外层断开 | 内层 ssh 随之断开,tunnel 报错退出(不重连) |
+| SIGINT/SIGTERM | 杀掉 ssh 子进程,优雅退出 |
 
-## 7. 测试策略
+## 6. 测试策略
 
-- 不依赖真实 VPS:进程内测试 SSH 服务器(`x/crypto/ssh` 实现,支持 `tcpip-forward`/`cancel-tcpip-forward`/`forwarded-tcpip` 与 `direct-tcpip`)
-- 拨号:成功路径;钉住公钥不匹配被拒
-- 反向转发端到端:echo 服务扮演内网服务,经 VPS 转发端口连通
-- 正向转发端到端:经 direct-tcpip 通道连通 VPS loopback 上的 echo 服务
-- 重连:服务器强制踢客户端,断言自动重连且 ctx 取消后优雅退出
-- 配置:TOML 加载、默认值、flag 覆盖优先级、缺必填项报错
+- **参数组装单测**:给定 flags + ssh_cmd,断言生成的 argv 精确匹配(三种模式)
+- **监督循环单测**:用假的 ssh 可执行文件(shell 脚本,可控退出时机/退出码),验证退避增长、稳定归零、Ctrl-C 杀子进程
+- **集成冒烟**(手动):本机 sshd 扮演 VPS,`tunnel server` + `tunnel client` 交互模式登入;`ExitOnForwardFailure` 端口占用路径
