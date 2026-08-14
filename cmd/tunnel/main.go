@@ -1,4 +1,4 @@
-// tunnel CLI:库包 remote-agent/tunnel 的薄壳(urfave/cli 实现)。
+// tunnel CLI:库包 remote-agent/tunnel 的薄壳(docopt 实现,与 pTunnel 同款)。
 //
 // 子命令:
 //
@@ -6,9 +6,9 @@
 //	tunnel client  客户端守护:正向转发(本机 LISTEN → VPS loopback:PORT)
 //	tunnel version 打印版本
 //
-// 参数优先级:内置默认值 < TOML 配置文件 < 命令行 flag。
-// 实现说明:-c/--config 需要在构建 flag 默认值之前知道(预扫描一次参数),
-// 之后 TOML 值作为 flag 的默认注册,flag 显式给出时自然覆盖。
+// 参数解析采用 docopt:usage 文本即语法定义,ParseArgs 产出 map;
+// 合并规则(与 pTunnel 一致):flag 已给出(map 值非 nil)则优先,
+// 否则回落到 TOML 配置文件,再回落到内置默认值。
 package main
 
 import (
@@ -18,53 +18,148 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
+	"strconv"
 	"syscall"
 
-	"github.com/urfave/cli/v3"
+	"github.com/docopt/docopt-go"
 
 	"remote-agent/tunnel"
 )
 
+const usageText = `tunnel —— 通用 SSH 端口转发工具(反向/正向转发,断线自动重连)
+
+Usage:
+  tunnel server [options]
+  tunnel client [options]
+  tunnel version
+
+Options:
+  -h --help                帮助
+  -c --config=PATH         TOML 配置文件(默认自动读取 ./tunnel.toml)
+  --remote-ip=IP           VPS 地址(必填,可在配置文件中给出)
+  --remote-ssh-port=N      VPS sshd 端口 [default: 22]
+  --remote-ssh-pub=PUB     VPS 主机公钥(钉住;.pub 文件路径或内联 authorized_keys 内容,必填)
+  --local-ssh-key=PATH     本机私钥(默认 ~/.ssh/id_ed25519)
+  --user=USER              VPS 登录用户(默认 $USER)
+  --local-ssh-port=N       本地端口(server: 内网 sshd,默认 22;client: 本机监听,默认跟随汇合端口)
+  --remote-listen-port=N   VPS loopback 汇合端口(必填)
+`
+
 func main() {
-	cmd := &cli.Command{
-		Name:  "tunnel",
-		Usage: "通用 SSH 端口转发工具(反向/正向转发,断线自动重连)",
-		Commands: []*cli.Command{
-			serverCmd(),
-			clientCmd(),
-			versionCmd(),
-		},
+	args, err := docopt.ParseArgs(usageText, os.Args[1:], "tunnel "+tunnel.Version)
+	if err != nil {
+		os.Exit(2) // docopt 已打印用法或错误信息
 	}
-	if err := cmd.Run(context.Background(), os.Args); err != nil {
-		log.Printf("tunnel: %v", err)
-		os.Exit(1)
+
+	switch {
+	case args["version"].(bool):
+		fmt.Printf("tunnel %s\n", tunnel.Version)
+	case args["server"].(bool):
+		runCmd(args, "server")
+	case args["client"].(bool):
+		runCmd(args, "client")
 	}
 }
 
-// 端口默认值集中定义:
-//   defaultRemoteListenPort  VPS loopback 汇合端口(server/client 两侧默认一致)
-//   defaultServerTargetPort  server 的 --local-ssh-port(内网 sshd)
-//   defaultClientListenPort  client 的 --local-ssh-port(本机监听,与汇合端口同值便于记忆)
-const (
-	defaultRemoteListenPort  = 5102
-	defaultServerTargetPort  = 22
-	defaultClientListenPort  = defaultRemoteListenPort
-)
+// runCmd 完成 server/client 的合并、校验与启动;出错即 log.Fatal。
+func runCmd(args map[string]interface{}, role string) {
+	p := merge(args, loadFileConfig(configPath(args)), role)
+	cfg, err := p.config()
+	if err != nil {
+		log.Fatalf("tunnel: %v", err)
+	}
 
-// findConfigPath 预扫描参数里的 -c/--config(分离与 = 两种写法);
-// 未指定且 ./tunnel.toml 存在时自动使用。
-func findConfigPath(args []string) string {
-	for i, a := range args {
-		if (a == "-c" || a == "--config") && i+1 < len(args) {
-			return args[i+1]
+	remote := fmt.Sprintf("127.0.0.1:%d", p.remoteListenPort)
+	local := fmt.Sprintf("127.0.0.1:%d", p.localSSHPort)
+	if role == "server" {
+		err = run(tunnel.NewClient(cfg, tunnel.ReverseForward(remote, local)))
+	} else {
+		err = run(tunnel.NewClient(cfg, tunnel.LocalForward(local, remote)))
+	}
+	if err != nil {
+		log.Fatalf("tunnel: %v", err)
+	}
+}
+
+// params 是合并后的全部参数。
+type params struct {
+	remoteIP         string
+	remoteSSHPort    int
+	remoteSSHPub     string
+	localSSHKey      string
+	user             string
+	localSSHPort     int
+	remoteListenPort int
+}
+
+func (p *params) config() (*tunnel.Config, error) {
+	if p.remoteIP == "" {
+		return nil, fmt.Errorf("缺少 --remote-ip(或配置文件 remote_ip)")
+	}
+	if p.remoteSSHPub == "" {
+		return nil, fmt.Errorf("缺少 --remote-ssh-pub(或配置文件 remote_ssh_pub)")
+	}
+	if p.remoteListenPort == 0 {
+		return nil, fmt.Errorf("缺少 --remote-listen-port(或配置文件 remote_listen_port)")
+	}
+	return &tunnel.Config{
+		SSHAddr: fmt.Sprintf("%s:%d", p.remoteIP, p.remoteSSHPort),
+		User:    p.user,
+		KeyPath: p.localSSHKey,
+		HostPub: p.remoteSSHPub,
+	}, nil
+}
+
+// merge 按 docopt map → TOML → 内置默认的优先级合并参数。
+// role 决定 local-ssh-port 的最终兜底:server 为 22,client 跟随汇合端口。
+func merge(args map[string]interface{}, fc *tunnel.FileConfig, role string) *params {
+	home, _ := os.UserHomeDir()
+	p := &params{
+		remoteIP:         strArg(args, "--remote-ip", fc.RemoteIP),
+		remoteSSHPort:    intArg(args, "--remote-ssh-port", fc.RemoteSSHPort),
+		remoteSSHPub:     strArg(args, "--remote-ssh-pub", fc.RemoteSSHPub),
+		localSSHKey:      strArg(args, "--local-ssh-key", orDefaultStr(fc.LocalSSHKey, filepath.Join(home, ".ssh", "id_ed25519"))),
+		user:             strArg(args, "--user", orDefaultStr(fc.User, os.Getenv("USER"))),
+		remoteListenPort: intArg(args, "--remote-listen-port", fc.RemoteListenPort),
+	}
+	// local-ssh-key 的 ~ 展开(docopt 默认值不会展开)
+	p.localSSHKey = expandHome(p.localSSHKey)
+
+	p.localSSHPort = intArg(args, "--local-ssh-port", fc.LocalSSHPort)
+	if p.localSSHPort == 0 {
+		if role == "server" {
+			p.localSSHPort = 22
+		} else {
+			p.localSSHPort = p.remoteListenPort
 		}
-		if v, ok := strings.CutPrefix(a, "-c="); ok {
-			return v
+	}
+	return p
+}
+
+// strArg/intArg:docopt 已给出(非 nil/非空)则用之,否则回落 fallback。
+// docopt 中[default:] 注明的值会以字符串形式出现在 map 里。
+func strArg(args map[string]interface{}, key, fallback string) string {
+	if v, ok := args[key].(string); ok && v != "" {
+		return v
+	}
+	return fallback
+}
+
+func intArg(args map[string]interface{}, key string, fallback int) int {
+	if v, ok := args[key].(string); ok && v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			log.Fatalf("tunnel: 参数 %s 不是合法数字: %q", key, v)
 		}
-		if v, ok := strings.CutPrefix(a, "--config="); ok {
-			return v
-		}
+		return n
+	}
+	return fallback
+}
+
+// configPath 取 -c/--config;未指定且 ./tunnel.toml 存在时自动使用。
+func configPath(args map[string]interface{}) string {
+	if v := strArg(args, "--config", ""); v != "" {
+		return v
 	}
 	if _, err := os.Stat("tunnel.toml"); err == nil {
 		return "tunnel.toml"
@@ -85,60 +180,23 @@ func loadFileConfig(path string) *tunnel.FileConfig {
 	return fc
 }
 
-// commonFlags 生成 server/client 共用的公共 flag 列表,默认值来自配置文件。
-func commonFlags(fc *tunnel.FileConfig) []cli.Flag {
-	home, _ := os.UserHomeDir()
-	defaultKey := fc.LocalSSHKey
-	if defaultKey == "" {
-		defaultKey = filepath.Join(home, ".ssh", "id_ed25519")
+func orDefaultStr(v, def string) string {
+	if v != "" {
+		return v
 	}
-	defaultSSHPort := fc.RemoteSSHPort
-	if defaultSSHPort == 0 {
-		defaultSSHPort = 22
-	}
-	defaultUser := fc.User
-	if defaultUser == "" {
-		defaultUser = os.Getenv("USER")
-	}
-	return []cli.Flag{
-		&cli.StringFlag{Name: "config", Aliases: []string{"c"}, Usage: "TOML 配置文件(默认 ./tunnel.toml)"},
-		&cli.StringFlag{Name: "remote-ip", Value: fc.RemoteIP, Usage: "VPS 地址(必填)"},
-		&cli.IntFlag{Name: "remote-ssh-port", Value: defaultSSHPort, Usage: "VPS sshd 端口"},
-		&cli.StringFlag{Name: "remote-ssh-pub", Value: fc.RemoteSSHPub, Usage: "VPS 主机公钥(.pub 路径或内联,必填)"},
-		&cli.StringFlag{Name: "local-ssh-key", Value: defaultKey, Usage: "本机私钥路径"},
-		&cli.StringFlag{Name: "user", Value: defaultUser, Usage: "VPS 登录用户"},
-	}
+	return def
 }
 
-// portFlags 生成两个端口 flag,默认值随子命令角色与配置文件。
-func portFlags(fc *tunnel.FileConfig, defaultLocal int) []cli.Flag {
-	lsp, rlp := defaultLocal, defaultRemoteListenPort
-	if fc.LocalSSHPort != 0 {
-		lsp = fc.LocalSSHPort
+func expandHome(p string) string {
+	if p == "~" {
+		home, _ := os.UserHomeDir()
+		return home
 	}
-	if fc.RemoteListenPort != 0 {
-		rlp = fc.RemoteListenPort
+	if len(p) > 1 && p[:2] == "~/" {
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, p[2:])
 	}
-	return []cli.Flag{
-		&cli.IntFlag{Name: "local-ssh-port", Value: lsp, Usage: "本地端口(server: 内网 sshd;client: 本机监听)"},
-		&cli.IntFlag{Name: "remote-listen-port", Value: rlp, Usage: "VPS loopback 汇合端口"},
-	}
-}
-
-// buildConfig 把合并后的参数组装为库层 Config 并校验必填。
-func buildConfig(cmd *cli.Command) (*tunnel.Config, error) {
-	if cmd.String("remote-ip") == "" {
-		return nil, fmt.Errorf("缺少 --remote-ip(或配置文件 remote_ip)")
-	}
-	if cmd.String("remote-ssh-pub") == "" {
-		return nil, fmt.Errorf("缺少 --remote-ssh-pub(或配置文件 remote_ssh_pub)")
-	}
-	return &tunnel.Config{
-		SSHAddr: fmt.Sprintf("%s:%d", cmd.String("remote-ip"), cmd.Int("remote-ssh-port")),
-		User:    cmd.String("user"),
-		KeyPath: cmd.String("local-ssh-key"),
-		HostPub: cmd.String("remote-ssh-pub"),
-	}, nil
+	return p
 }
 
 // run 把库层守护循环接上信号取消:SIGINT/SIGTERM 时优雅退出。
@@ -146,53 +204,4 @@ func run(c *tunnel.Client) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	return c.Run(ctx)
-}
-
-func serverCmd() *cli.Command {
-	fc := loadFileConfig(findConfigPath(os.Args[2:]))
-	return &cli.Command{
-		Name:  "server",
-		Usage: "内网侧守护:反向转发(VPS loopback:PORT → 内网 sshd)",
-		Flags: append(commonFlags(fc), portFlags(fc, defaultServerTargetPort)...),
-		Action: func(_ context.Context, cmd *cli.Command) error {
-			cfg, err := buildConfig(cmd)
-			if err != nil {
-				return err
-			}
-			// 反向:VPS loopback:remote-listen-port → 内网 local-ssh-port
-			remote := fmt.Sprintf("127.0.0.1:%d", cmd.Int("remote-listen-port"))
-			local := fmt.Sprintf("127.0.0.1:%d", cmd.Int("local-ssh-port"))
-			return run(tunnel.NewClient(cfg, tunnel.ReverseForward(remote, local)))
-		},
-	}
-}
-
-func clientCmd() *cli.Command {
-	fc := loadFileConfig(findConfigPath(os.Args[2:]))
-	return &cli.Command{
-		Name:  "client",
-		Usage: "客户端守护:正向转发(本机 LISTEN → VPS loopback:PORT)",
-		Flags: append(commonFlags(fc), portFlags(fc, defaultClientListenPort)...),
-		Action: func(_ context.Context, cmd *cli.Command) error {
-			cfg, err := buildConfig(cmd)
-			if err != nil {
-				return err
-			}
-			// 正向:本机 local-ssh-port → VPS loopback:remote-listen-port
-			listen := fmt.Sprintf("127.0.0.1:%d", cmd.Int("local-ssh-port"))
-			target := fmt.Sprintf("127.0.0.1:%d", cmd.Int("remote-listen-port"))
-			return run(tunnel.NewClient(cfg, tunnel.LocalForward(listen, target)))
-		},
-	}
-}
-
-func versionCmd() *cli.Command {
-	return &cli.Command{
-		Name:  "version",
-		Usage: "打印版本",
-		Action: func(_ context.Context, _ *cli.Command) error {
-			fmt.Printf("tunnel %s\n", tunnel.Version)
-			return nil
-		},
-	}
 }
