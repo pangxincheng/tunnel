@@ -31,11 +31,13 @@
 
 ```bash
 git clone <仓库地址> && cd remote-agent
-go build -o tunnel ./cmd/tunnel
+mkdir -p dist && go build -o dist/tunnel ./cmd/tunnel
 
 # 运行测试(不依赖真实 VPS,内置进程内测试 SSH 服务器)
 go test ./...
 ```
+
+注意:二进制不能输出到仓库根目录的 `./tunnel` —— 该位置是库源码目录 `tunnel/`。
 
 ## 使用
 
