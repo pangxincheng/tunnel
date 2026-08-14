@@ -17,7 +17,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"tunnel"
+	"remote-agent/tunnel"
 )
 
 func main() {
