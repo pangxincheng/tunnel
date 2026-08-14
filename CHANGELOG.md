@@ -16,6 +16,7 @@
 - 新增 `tunnel/forwarders.go`:`ReverseForwarder`/`LocalForwarder` 工厂 —— 把 listener 创建与 accept/代理循环封装为可直接传给 `NewClient` 的 establish 闭包,调用方(CLI/移动端)不再手写胶水;CLI 改用工厂,README 库示例同步简化。
 - 精简转发 API:删除只建 listener 的中间层函数,逻辑并入工厂;工厂更名 `ReverseForward`/`LocalForward`(去掉 -er 后缀);冗余的底层端到端测试合并入工厂测试。
 - 合并 `forwarders.go` 回 `forward.go`(转发能力单文件承载:两工厂 + ProxyToLocal + proxyBidirectional),测试文件同步更名 `forward_test.go`。
+- CLI 参数解析改用 `urfave/cli/v3`:子命令/flag 声明式定义,公共 flag 与端口 flag 收敛为 `commonFlags`/`portFlags` 两个生成函数,TOML 值作为 flag 默认注册(优先级 默认 < TOML < flag 不变);曾评估 cobra+viper 因依赖过重放弃。
 
 
 ## 2026-08-14(修订 2)

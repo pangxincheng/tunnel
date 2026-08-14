@@ -1,21 +1,18 @@
-// tunnel CLI:库包 remote-agent/tunnel 的薄壳。
+// tunnel CLI:库包 remote-agent/tunnel 的薄壳(urfave/cli 实现)。
 //
 // 子命令:
 //
 //	tunnel server  内网侧守护:反向转发(VPS loopback:PORT → 内网 sshd)
 //	tunnel client  客户端守护:正向转发(本机 LISTEN → VPS loopback:PORT)
+//	tunnel version 打印版本
 //
 // 参数优先级:内置默认值 < TOML 配置文件 < 命令行 flag。
-//
-// 架构说明:server/client 两个子命令在 SSH 协议层面都是"客户端"
-// (都主动向 VPS 发起连接),区别只在转发方向。因此二者复用同一个
-// tunnel.Client 监督循环,方向差异通过 establish 函数注入 ——
-// 详见 cmdServer/cmdClient 中各自的闭包。
+// 实现说明:-c/--config 需要在构建 flag 默认值之前知道(预扫描一次参数),
+// 之后 TOML 值作为 flag 的默认注册,flag 显式给出时自然覆盖。
 package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -24,70 +21,29 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/urfave/cli/v3"
+
 	"remote-agent/tunnel"
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		usage()
-		os.Exit(2)
+	cmd := &cli.Command{
+		Name:  "tunnel",
+		Usage: "通用 SSH 端口转发工具(反向/正向转发,断线自动重连)",
+		Commands: []*cli.Command{
+			serverCmd(),
+			clientCmd(),
+			versionCmd(),
+		},
 	}
-	var err error
-	switch os.Args[1] {
-	case "server":
-		err = cmdServer(os.Args[2:])
-	case "client":
-		err = cmdClient(os.Args[2:])
-	case "version":
-		fmt.Printf("tunnel %s\n", tunnel.Version)
-	default:
-		usage()
-		os.Exit(2)
-	}
-	if err != nil {
+	if err := cmd.Run(context.Background(), os.Args); err != nil {
 		log.Printf("tunnel: %v", err)
 		os.Exit(1)
 	}
 }
 
-func usage() {
-	fmt.Fprintln(os.Stderr, `tunnel —— 通用 SSH 端口转发工具(反向/正向转发,断线自动重连)
-
-用法:
-  tunnel server  在内网机器上运行:把内网 sshd 映射到 VPS loopback
-  tunnel client  在客户端运行:把 VPS loopback 的汇合端口拉回本机
-  tunnel version 打印版本
-
-子命令参数:
-  tunnel server [--local-ssh-port 22]   [--remote-listen-port 5102] [公共参数...]
-  tunnel client [--local-ssh-port 5102] [--remote-listen-port 5102] [公共参数...]
-
-公共参数:
-  -c, --config 路径        TOML 配置文件(默认自动读取 ./tunnel.toml)
-  --remote-ip IP           VPS 地址(必填,可在配置文件中给出)
-  --remote-ssh-port N      VPS sshd 端口(默认 22)
-  --remote-ssh-pub 公钥    VPS 主机公钥(钉住;.pub 文件路径或内联 authorized_keys 内容,必填)
-  --local-ssh-key 路径     本机私钥(默认 ~/.ssh/id_ed25519)
-  --user 用户              VPS 登录用户(默认 $USER)
-
-参数优先级:默认值 < 配置文件 < 命令行 flag
-
-示例:
-  # 内网服务器:
-  tunnel server --remote-ip vps.example.com --remote-ssh-pub ~/.ssh/vps.pub
-  # 客户端:
-  tunnel client --remote-ip vps.example.com --remote-ssh-pub ~/.ssh/vps.pub
-  # 之后即可登入内网:
-  ssh -p 5102 <内网用户>@127.0.0.1`)
-}
-
-// findConfigPath 预扫描参数里的 -c/--config(支持分离与 = 两种写法)。
-//
-// 为什么要预扫描:标准库 flag 的默认值必须在注册时给出,
-// 而"配置文件充当中间层默认值"要求先知道配置文件路径才能注册 flag。
-// 所以流程是两阶段:先在原始 args 里把 -c 挑出来 → 加载 TOML →
-// 用 TOML 值注册 flag 默认值 → 再正常 Parse(flag 值自然覆盖 TOML)。
-// 未指定 -c 且 ./tunnel.toml 存在时,自动使用该默认路径。
+// findConfigPath 预扫描参数里的 -c/--config(分离与 = 两种写法);
+// 未指定且 ./tunnel.toml 存在时自动使用。
 func findConfigPath(args []string) string {
 	for i, a := range args {
 		if (a == "-c" || a == "--config") && i+1 < len(args) {
@@ -106,8 +62,8 @@ func findConfigPath(args []string) string {
 	return ""
 }
 
-// loadFileConfig 加载 TOML 配置;path 为空返回全零配置(纯 flag 模式)。
-// 显式指定了 -c 但读不到属于用法错误,立即终止(不静默忽略)。
+// loadFileConfig 加载 TOML;path 为空返回全零配置(纯 flag 模式)。
+// 显式指定了 -c 但读不到属用法错误,立即终止。
 func loadFileConfig(path string) *tunnel.FileConfig {
 	if path == "" {
 		return &tunnel.FileConfig{}
@@ -119,17 +75,8 @@ func loadFileConfig(path string) *tunnel.FileConfig {
 	return fc
 }
 
-// common 承载公共 flag;默认值来自配置文件(再往下才是内置默认)。
-type common struct {
-	remoteIP      *string
-	remoteSSHPort *int
-	remoteSSHPub  *string
-	localSSHKey   *string
-	user          *string
-}
-
-// register 把公共 flag 注册进 fs,默认值依次取:flag > TOML > 内置。
-func (c *common) register(fs *flag.FlagSet, fc *tunnel.FileConfig) {
+// commonFlags 生成 server/client 共用的公共 flag 列表,默认值来自配置文件。
+func commonFlags(fc *tunnel.FileConfig) []cli.Flag {
 	home, _ := os.UserHomeDir()
 	defaultKey := fc.LocalSSHKey
 	if defaultKey == "" {
@@ -143,101 +90,99 @@ func (c *common) register(fs *flag.FlagSet, fc *tunnel.FileConfig) {
 	if defaultUser == "" {
 		defaultUser = os.Getenv("USER")
 	}
-	c.remoteIP = fs.String("remote-ip", fc.RemoteIP, "VPS 地址(必填)")
-	c.remoteSSHPort = fs.Int("remote-ssh-port", defaultSSHPort, "VPS sshd 端口")
-	c.remoteSSHPub = fs.String("remote-ssh-pub", fc.RemoteSSHPub, "VPS 主机公钥(.pub 路径或内联,必填)")
-	c.localSSHKey = fs.String("local-ssh-key", defaultKey, "本机私钥路径")
-	c.user = fs.String("user", defaultUser, "VPS 登录用户")
+	return []cli.Flag{
+		&cli.StringFlag{Name: "config", Aliases: []string{"c"}, Usage: "TOML 配置文件(默认 ./tunnel.toml)"},
+		&cli.StringFlag{Name: "remote-ip", Value: fc.RemoteIP, Usage: "VPS 地址(必填)"},
+		&cli.IntFlag{Name: "remote-ssh-port", Value: defaultSSHPort, Usage: "VPS sshd 端口"},
+		&cli.StringFlag{Name: "remote-ssh-pub", Value: fc.RemoteSSHPub, Usage: "VPS 主机公钥(.pub 路径或内联,必填)"},
+		&cli.StringFlag{Name: "local-ssh-key", Value: defaultKey, Usage: "本机私钥路径"},
+		&cli.StringFlag{Name: "user", Value: defaultUser, Usage: "VPS 登录用户"},
+	}
 }
 
-// config 把合并后的参数组装成库层 Config,并做必填校验。
-func (c *common) config() (*tunnel.Config, error) {
-	if *c.remoteIP == "" {
+// portFlags 生成两个端口 flag,默认值随子命令角色与配置文件。
+func portFlags(fc *tunnel.FileConfig, defaultLocal int) []cli.Flag {
+	lsp, rlp := defaultLocal, 5102
+	if fc.LocalSSHPort != 0 {
+		lsp = fc.LocalSSHPort
+	}
+	if fc.RemoteListenPort != 0 {
+		rlp = fc.RemoteListenPort
+	}
+	return []cli.Flag{
+		&cli.IntFlag{Name: "local-ssh-port", Value: lsp, Usage: "本地端口(server: 内网 sshd;client: 本机监听)"},
+		&cli.IntFlag{Name: "remote-listen-port", Value: rlp, Usage: "VPS loopback 汇合端口"},
+	}
+}
+
+// buildConfig 把合并后的参数组装为库层 Config 并校验必填。
+func buildConfig(cmd *cli.Command) (*tunnel.Config, error) {
+	if cmd.String("remote-ip") == "" {
 		return nil, fmt.Errorf("缺少 --remote-ip(或配置文件 remote_ip)")
 	}
-	if *c.remoteSSHPub == "" {
+	if cmd.String("remote-ssh-pub") == "" {
 		return nil, fmt.Errorf("缺少 --remote-ssh-pub(或配置文件 remote_ssh_pub)")
 	}
 	return &tunnel.Config{
-		SSHAddr: fmt.Sprintf("%s:%d", *c.remoteIP, *c.remoteSSHPort),
-		User:    *c.user,
-		KeyPath: *c.localSSHKey,
-		HostPub: *c.remoteSSHPub,
+		SSHAddr: fmt.Sprintf("%s:%d", cmd.String("remote-ip"), cmd.Int("remote-ssh-port")),
+		User:    cmd.String("user"),
+		KeyPath: cmd.String("local-ssh-key"),
+		HostPub: cmd.String("remote-ssh-pub"),
 	}, nil
 }
 
-// signalCtx 把 SIGINT/SIGTERM 转化为 ctx 取消;
-// Client.Run 检测到取消后会主动断开 SSH 连接并退出。
-func signalCtx() (context.Context, context.CancelFunc) {
-	return signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-}
-
-// configFlag 把 -c/--config 注册进 FlagSet,使其通过 Parse 校验。
-// 值本身已在预扫描阶段(findConfigPath)消费,这里只为"占位防报错"。
-func configFlag(fs *flag.FlagSet) {
-	fs.String("c", "", "TOML 配置文件")
-	fs.String("config", "", "TOML 配置文件")
-}
-
-// cmdServer 内网侧守护:VPS loopback:PORT → 内网 sshd(反向转发)。
-func cmdServer(args []string) error {
-	fc := loadFileConfig(findConfigPath(args))
-	fs := flag.NewFlagSet("server", flag.ContinueOnError)
-	lspDefault, rlpDefault := 22, 5102
-	if fc.LocalSSHPort != 0 {
-		lspDefault = fc.LocalSSHPort
-	}
-	if fc.RemoteListenPort != 0 {
-		rlpDefault = fc.RemoteListenPort
-	}
-	lsp := fs.Int("local-ssh-port", lspDefault, "内网 sshd 端口")
-	rlp := fs.Int("remote-listen-port", rlpDefault, "VPS loopback 监听端口")
-	var cm common
-	cm.register(fs, fc)
-	configFlag(fs)
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	cfg, err := cm.config()
-	if err != nil {
-		return err
-	}
-
-	// 反向转发策略由库工厂直接给出(含 accept/代理循环);
-	// 重连时监督循环重新调用,转发随新连接复活。
-	c := tunnel.NewClient(cfg, tunnel.ReverseForward(fmt.Sprintf("127.0.0.1:%d", *rlp), fmt.Sprintf("127.0.0.1:%d", *lsp)))
-	ctx, stop := signalCtx()
+// run 把库层守护循环接上信号取消:SIGINT/SIGTERM 时优雅退出。
+func run(c *tunnel.Client) error {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	return c.Run(ctx)
 }
 
-// cmdClient 客户端守护:本机 LISTEN → VPS loopback:PORT(正向转发)。
-func cmdClient(args []string) error {
-	fc := loadFileConfig(findConfigPath(args))
-	fs := flag.NewFlagSet("client", flag.ContinueOnError)
-	lspDefault, rlpDefault := 5102, 5102
-	if fc.LocalSSHPort != 0 {
-		lspDefault = fc.LocalSSHPort
+func serverCmd() *cli.Command {
+	fc := loadFileConfig(findConfigPath(os.Args[2:]))
+	return &cli.Command{
+		Name:  "server",
+		Usage: "内网侧守护:反向转发(VPS loopback:PORT → 内网 sshd)",
+		Flags: append(commonFlags(fc), portFlags(fc, 22)...),
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			cfg, err := buildConfig(cmd)
+			if err != nil {
+				return err
+			}
+			// 反向:VPS loopback:remote-listen-port → 内网 local-ssh-port
+			remote := fmt.Sprintf("127.0.0.1:%d", cmd.Int("remote-listen-port"))
+			local := fmt.Sprintf("127.0.0.1:%d", cmd.Int("local-ssh-port"))
+			return run(tunnel.NewClient(cfg, tunnel.ReverseForward(remote, local)))
+		},
 	}
-	if fc.RemoteListenPort != 0 {
-		rlpDefault = fc.RemoteListenPort
-	}
-	lsp := fs.Int("local-ssh-port", lspDefault, "本机监听端口")
-	rlp := fs.Int("remote-listen-port", rlpDefault, "VPS loopback 汇合端口")
-	var cm common
-	cm.register(fs, fc)
-	configFlag(fs)
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	cfg, err := cm.config()
-	if err != nil {
-		return err
-	}
+}
 
-	// 正向转发策略由库工厂直接给出。
-	c := tunnel.NewClient(cfg, tunnel.LocalForward(fmt.Sprintf("127.0.0.1:%d", *lsp), fmt.Sprintf("127.0.0.1:%d", *rlp)))
-	ctx, stop := signalCtx()
-	defer stop()
-	return c.Run(ctx)
+func clientCmd() *cli.Command {
+	fc := loadFileConfig(findConfigPath(os.Args[2:]))
+	return &cli.Command{
+		Name:  "client",
+		Usage: "客户端守护:正向转发(本机 LISTEN → VPS loopback:PORT)",
+		Flags: append(commonFlags(fc), portFlags(fc, 5102)...),
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			cfg, err := buildConfig(cmd)
+			if err != nil {
+				return err
+			}
+			// 正向:本机 local-ssh-port → VPS loopback:remote-listen-port
+			listen := fmt.Sprintf("127.0.0.1:%d", cmd.Int("local-ssh-port"))
+			target := fmt.Sprintf("127.0.0.1:%d", cmd.Int("remote-listen-port"))
+			return run(tunnel.NewClient(cfg, tunnel.LocalForward(listen, target)))
+		},
+	}
+}
+
+func versionCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "version",
+		Usage: "打印版本",
+		Action: func(_ context.Context, _ *cli.Command) error {
+			fmt.Printf("tunnel %s\n", tunnel.Version)
+			return nil
+		},
+	}
 }
