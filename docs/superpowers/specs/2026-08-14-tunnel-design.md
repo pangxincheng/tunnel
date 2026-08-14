@@ -1,25 +1,24 @@
 # tunnel · 设计文档
 
-日期:2026-08-14(修订:实现路线改为 ssh 编排器)
+日期:2026-08-14(修订 2:实现路线改为 x/crypto/ssh 库,支持移动端 gomobile)
 状态:已评审
 
-通用 SSH 端口转发工具。单 binary 双子命令:`tunnel server`(内网侧反向转发守护)与 `tunnel client`(客户端接入)。组合效果:客户端一条命令登进内网 sshd,公网 VPS 只暴露一个 SSH 端口。
+通用 SSH 端口转发工具/库。Go 包 `tunnel` 承载全部核心逻辑(可被移动端 gomobile 调用),CLI `tunnel` 是薄壳,两个子命令:`server`(内网侧反向转发守护)、`client`(守护正向转发)。组合效果:客户端架起转发后用系统 ssh 登进内网,公网 VPS 只暴露一个 SSH 端口。
 
 ## 1. 范围
 
-**做**:一条端口映射(VPS loopback:PORT ↔ 内网 sshd);server 守护(掉线退避重连);client 交互登录与 `-N` 守护两种模式;纯 flags + ssh_cmd 透传。
+**做**:一条端口映射(VPS loopback:PORT ↔ 内网 sshd);server/client 守护(掉线退避重连);核心全部在 Go 包内,移动端经 gomobile 复用。
 
-**不做**:自研 SSH 协议栈(2026-08-14 修订:全部交还给系统 ssh)、配置文件(参数已足够少)、多映射、公网直连模式、终端复用。
+**不做**:配置文件、多映射、公网直连模式、终端复用、移动端 UI、`connect` 便利命令(= client + exec 系统 ssh,纯组合无新能力,后续需要再加)。
 
-## 2. 实现路线:ssh 编排器
+## 2. 实现路线:x/crypto/ssh 库
 
-tunnel **不包含任何 SSH 协议逻辑**,只做两件事:**参数组装**(把意图翻译成正确的 ssh 命令行)与**进程监督**(保活、掉线重连)。认证、加密、known_hosts 校验、心跳、字节代理全部归还给系统 OpenSSH 客户端。
+核心逻辑用 `golang.org/x/crypto/ssh` 实现为 Go 包 —— 2026-08-14 修订:此前定的"编排系统 ssh"路线在移动端不成立(手机没有 ssh 进程可编排,gomobile 需要纯 Go 库)。
 
-带来的性质:
-
-- 用户的认证方式(密钥/agent/密码)、TOFU 确认、`-o` 自定义选项原样生效 —— 零适配成本
-- 主机公钥校验由 ssh 的 known_hosts 负责(标准 TOFU 模型,交互可见)
-- 假死发现用 ssh 原生的 `ServerAliveInterval/ServerAliveCountMax`,转发失败用 `ExitOnForwardFailure=yes` 立即暴露
+- **认证**:私钥文件(CLI flag 或库层注入 PEM 字节);agent 不作为默认路径(显式优于隐式);密码认证库层预留(移动端)
+- **主机公钥校验**:**钉住** `--remote-ssh-pub` 给出的 VPS 主机公钥,逐字节比对,不匹配即拒绝;无 TOFU、无 known_hosts 依赖 —— 确定性模型,移动端注入友好。`HostKeyAlgorithms` 收敛到钉住公钥类型(x/crypto 默认偏好 ECDSA 先于 Ed25519,不限定会误判)
+- **保活**:应用层 `keepalive@openssh.com` 心跳(15s),探测失败主动断开触发重连
+- **重连**:指数退避(1s→30s,±20% 抖动),连接稳定 60s 归零;ctx 取消优雅退出
 
 ## 3. 架构与链路
 
@@ -41,62 +40,48 @@ tunnel **不包含任何 SSH 协议逻辑**,只做两件事:**参数组装**(把
 ## 4. 命令接口
 
 ```bash
-tunnel server [--local-ssh-port 22] [--remote-listen-port 5102] -- <ssh_cmd...>
+tunnel server [--local-ssh-port 22]   [--remote-listen-port 5102] \
+              --remote-ip IP [--remote-ssh-port 22] [--remote-ssh-pub PUB] [--local-ssh-key KEY] [--user U]
 
-tunnel client [--remote-listen-port 5102] [--remote-listen-user $USER] -- <ssh_cmd...>
-
-tunnel client -N [--listen 127.0.0.1:5102] [--remote-listen-port 5102] -- <ssh_cmd...>
+tunnel client [--local-ssh-port 5102] [--remote-listen-port 5102] \
+              --remote-ip IP [--remote-ssh-port 22] [--remote-ssh-pub PUB] [--local-ssh-key KEY] [--user U]
 ```
 
-- `ssh_cmd`:完整的 ssh 参数(如 `ssh -p 22 ubuntu@1.2.3.4` 去掉开头的 `ssh`),**原样透传、零解析**;tunnel 只在前面拼接自己计算的转发/选项参数
-- `--local-ssh-port`:内网 sshd 端口(server 转发目标)
+公共参数(用库后显式给出,系统 ssh 的隐式行为全部参数化):
+
+| 参数 | 含义 | 默认 |
+|---|---|---|
+| `--remote-ip` | VPS 地址 | 必填 |
+| `--remote-ssh-port` | VPS sshd 端口 | 22 |
+| `--remote-ssh-pub` | VPS 主机公钥(钉住;接受文件路径或内联 base64) | 必填 |
+| `--local-ssh-key` | 本机私钥路径(向 VPS 认证) | `~/.ssh/id_ed25519` |
+| `--user` | VPS 登录用户 | `$USER` |
+
+- `--local-ssh-port`:含义随子命令 —— server 上是"内网 sshd 端口"(转发目标),client 上是"本机监听端口"(插座口)
 - `--remote-listen-port`:VPS loopback 上的汇合端口,server/client 必须一致
-- `--remote-listen-user`:内网 sshd 的登录用户(client 交互模式内层登录用)
-- `--listen`:client `-N` 模式的本机监听地址
 
-### server 翻译结果
+### server 行为(守护反向转发)
 
-```bash
-ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
-    -R <remote-listen-port>:127.0.0.1:<local-ssh-port> <ssh_cmd...>
-```
+经 SSH 向 VPS sshd 请求 `tcpip-forward`(绑 loopback),把 VPS localhost:PORT 的每个连接代理到 `127.0.0.1:<local-ssh-port>`。掉线退避重连(1s→30s,稳定 60s 归零);Ctrl-C 优雅退出。
 
-监督:进程退出 → 指数退避(1s→30s,稳定 60s 归零)→ 重连;Ctrl-C 杀掉 ssh 子进程后退出。
+### client 行为(守护正向转发)
 
-### client 交互模式翻译结果
-
-```bash
-# ① 外层(后台):
-ssh -N -o ExitOnForwardFailure=yes -L <remote-listen-port>:127.0.0.1:<remote-listen-port> <ssh_cmd...>
-# ② 外层端口就绪后,内层(前台,交互):
-ssh -p <remote-listen-port> <remote-listen-user>@127.0.0.1
-```
-
-内层退出 → 杀掉外层 → 退出。**不重连**(交互会话状态续不上,重连是假象)。
-
-### client -N 守护模式翻译结果
-
-```bash
-ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
-    -L <listen-port>:127.0.0.1:<remote-listen-port> <ssh_cmd...>
-```
-
-监督逻辑与 server 相同(退避重连)。
+本机 `127.0.0.1:<local-ssh-port>` 监听,每个连接经 SSH `direct-tcpip` 通道请 VPS 代连 localhost:PORT。架好后该端口即内网 sshd 的映射口,随时 `ssh -p <local-ssh-port> <user>@127.0.0.1`(系统 ssh 的 agent/known_hosts 自动生效)。监督逻辑与 server 相同。
 
 ## 5. 错误处理
 
 | 场景 | 行为 |
 |---|---|
 | 参数缺失/无法解析 | 打印用法,退出码 2 |
-| 系统无 `ssh` 可执行文件 | 启动报错 |
-| 首次连接 TOFU 确认 | ssh 原生交互提示,原样呈现 |
-| VPS 端口被占 / 认证失败 | ssh 立即退出(ExitOnForwardFailure),server/-N 模式退避重连;client 交互模式报错退出 |
-| 连接假死 | ServerAlive 超时,ssh 自行退出,进入重连 |
-| client 交互模式外层断开 | 内层 ssh 随之断开,tunnel 报错退出(不重连) |
-| SIGINT/SIGTERM | 杀掉 ssh 子进程,优雅退出 |
+| 主机公钥与钉住值不符(疑似攻击) | 拒绝连接,打印期望指纹;不自动放行 |
+| VPS 端口被占 / 认证失败 / 转发请求被拒 | 报错并退避重连 |
+| 连接假死 | keepalive 探测失败,主动断开进入重连 |
+| SIGINT/SIGTERM | 主动断开连接,优雅退出 |
 
 ## 6. 测试策略
 
-- **参数组装单测**:给定 flags + ssh_cmd,断言生成的 argv 精确匹配(三种模式)
-- **监督循环单测**:用假的 ssh 可执行文件(shell 脚本,可控退出时机/退出码),验证退避增长、稳定归零、Ctrl-C 杀子进程
-- **集成冒烟**(手动):本机 sshd 扮演 VPS,`tunnel server` + `tunnel client` 交互模式登入;`ExitOnForwardFailure` 端口占用路径
+- 不依赖真实 VPS:进程内测试 SSH 服务器(`x/crypto/ssh` 实现,支持 `tcpip-forward`/`forwarded-tcpip` 反向与 `direct-tcpip` 正向、多类型主机密钥)
+- 拨号:成功路径;known_hosts 不匹配被拒
+- 反向/正向转发端到端:echo 服务经两跳连通
+- 重连:服务器强制踢客户端,断言自动重连且 ctx 取消后优雅退出
+- 集成冒烟(手动):本机 sshd 扮演 VPS,server + connect 登入;client 守护 + `ssh -p` 验证
