@@ -3,6 +3,7 @@
 ## 2026-08-14(实现)
 
 - 新增 `backoff.go`:带 ±20% 抖动的指数退避。
+- 新增 `ssh.go`:Dial —— 私钥认证(KeyPEM/KeyPath)+ 主机公钥钉住(.pub 文件或内联 authorized_keys 双形态,算法收敛防多密钥误判);`testserver_test.go` 进程内测试 SSH 服务器(双主机密钥)。
 
 
 ## 2026-08-14(修订 2)
