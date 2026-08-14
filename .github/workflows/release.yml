@@ -1,0 +1,67 @@
+# 发布工作流:打 tag(如 v0.2.0)即触发。
+# 流程:跑测试 → 6 平台交叉编译(CGO_ENABLED=0,版本经 ldflags 注入)
+# → 打包 → 汇总到 GitHub Release。
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - run: go test ./... -count=1
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, windows, darwin]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: 编译(版本注入 + 静态编译)
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+          BIN=tunnel
+          if [ "$GOOS" = "windows" ]; then BIN=tunnel.exe; fi
+          mkdir -p dist
+          go build -trimpath -ldflags "-s -w -X remote-agent/tunnel.Version=$VERSION" \
+            -o "dist/$BIN" ./cmd/tunnel
+
+      - name: 打包
+        run: |
+          cd dist
+          NAME=tunnel_${GITHUB_REF_NAME}_${GOOS}_${GOARCH}
+          if [ "$GOOS" = "windows" ]; then
+            zip "${NAME}.zip" tunnel.exe
+          else
+            tar czf "${NAME}.tar.gz" tunnel
+          fi
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+
+      - name: 上传到 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/tunnel_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}.*
