@@ -175,9 +175,41 @@ func (s *testSSHServer) forwardAcceptLoop(conn *ssh.ServerConn, l net.Listener, 
 	}
 }
 
-// handleChannel 在 Task 4 中扩展 direct-tcpip;基础版全部拒绝。
+type directTCPIPPayload struct {
+	DestAddr   string
+	DestPort   uint32
+	OriginAddr string
+	OriginPort uint32
+}
+
+// handleChannel 支持 direct-tcpip:sshd 代客户端连接目标并双向转发。
 func (s *testSSHServer) handleChannel(conn *ssh.ServerConn, ch ssh.NewChannel) {
-	ch.Reject(ssh.UnknownChannelType, "unsupported")
+	if ch.ChannelType() != "direct-tcpip" {
+		ch.Reject(ssh.UnknownChannelType, "unsupported")
+		return
+	}
+	var p directTCPIPPayload
+	if ssh.Unmarshal(ch.ExtraData(), &p) != nil {
+		ch.Reject(ssh.ConnectionFailed, "bad payload")
+		return
+	}
+	target, err := net.Dial("tcp", fmt.Sprintf("%s:%d", p.DestAddr, p.DestPort))
+	if err != nil {
+		ch.Reject(ssh.ConnectionFailed, err.Error())
+		return
+	}
+	channel, reqs, err := ch.Accept()
+	if err != nil {
+		target.Close()
+		return
+	}
+	go ssh.DiscardRequests(reqs)
+	go func() {
+		defer channel.Close()
+		defer target.Close()
+		go io.Copy(channel, target)
+		io.Copy(target, channel)
+	}()
 }
 
 // CloseAllClients 强制断开所有已接入的客户端(重连测试用)。

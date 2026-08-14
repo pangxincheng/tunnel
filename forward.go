@@ -20,6 +20,33 @@ func ReverseForward(client *ssh.Client, bindAddr string, remotePort int, localTa
 	return listener, nil
 }
 
+// LocalForward 在 listenAddr 监听,把每条接入连接经 SSH direct-tcpip 通道
+// 转发到 target —— 即 ssh -L 的程序化等价物。
+// accept/代理循环已在内部启动;返回 listener 由调用方持有与关闭。
+func LocalForward(client *ssh.Client, listenAddr, target string) (net.Listener, error) {
+	listener, err := net.Listen("tcp", listenAddr)
+	if err != nil {
+		return nil, fmt.Errorf("本地监听 %s: %w", listenAddr, err)
+	}
+	go func() {
+		for {
+			local, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				ch, err := client.Dial("tcp", target)
+				if err != nil {
+					local.Close() // 快速失败,不挂起调用方
+					return
+				}
+				proxyBidirectional(local, ch)
+			}()
+		}
+	}()
+	return listener, nil
+}
+
 // ProxyToLocal 把一条连接代理到本地地址;本地不可达时直接断开(快速失败)。
 func ProxyToLocal(remote net.Conn, localTarget string) {
 	local, err := net.DialTimeout("tcp", localTarget, 5*time.Second)

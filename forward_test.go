@@ -72,3 +72,35 @@ func TestReverseForwardEndToEnd(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestLocalForwardEndToEnd(t *testing.T) {
+	privPath, pub := writeClientKey(t)
+	server := startTestSSHServer(t, pub)
+	echo := startEchoServer(t) // 扮演 VPS loopback 上的服务
+
+	client, err := Dial(&Config{
+		SSHAddr: server.Addr(), User: "u", KeyPath: privPath,
+		HostPub: writeHostPub(t, server.HostKey),
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer client.Close()
+
+	listener, err := LocalForward(client, "127.0.0.1:0", echo)
+	if err != nil {
+		t.Fatalf("LocalForward: %v", err)
+	}
+	defer listener.Close()
+
+	conn, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("dial local: %v", err)
+	}
+	defer conn.Close()
+	fmt.Fprintln(conn, "world")
+	got, _ := bufio.NewReader(conn).ReadString('\n')
+	if got != "echo: world\n" {
+		t.Fatalf("got %q", got)
+	}
+}
