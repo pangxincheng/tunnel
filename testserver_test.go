@@ -89,7 +89,89 @@ func (s *testSSHServer) handleConn(c net.Conn) {
 
 func (s *testSSHServer) handleGlobalRequests(conn *ssh.ServerConn, reqs <-chan *ssh.Request) {
 	for req := range reqs {
-		req.Reply(req.Type == "keepalive@openssh.com", nil)
+		switch req.Type {
+		case "keepalive@openssh.com":
+			req.Reply(true, nil)
+		case "tcpip-forward":
+			s.handleForwardRequest(conn, req)
+		case "cancel-tcpip-forward":
+			var p tcpipForwardRequest
+			if ssh.Unmarshal(req.Payload, &p) == nil {
+				s.forwardsMu.Lock()
+				if l, ok := s.forwards[p.BindPort]; ok {
+					l.Close()
+					delete(s.forwards, p.BindPort)
+				}
+				s.forwardsMu.Unlock()
+			}
+			req.Reply(true, nil)
+		default:
+			req.Reply(false, nil)
+		}
+	}
+}
+
+type tcpipForwardRequest struct {
+	BindAddr string
+	BindPort uint32
+}
+
+type forwardedTCPIPPayload struct {
+	ConnectedAddr string
+	ConnectedPort uint32
+	OriginAddr    string
+	OriginPort    uint32
+}
+
+func (s *testSSHServer) handleForwardRequest(conn *ssh.ServerConn, req *ssh.Request) {
+	var p tcpipForwardRequest
+	if ssh.Unmarshal(req.Payload, &p) != nil {
+		req.Reply(false, nil)
+		return
+	}
+	l, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", p.BindPort))
+	if err != nil {
+		req.Reply(false, nil)
+		return
+	}
+	bound := uint32(l.Addr().(*net.TCPAddr).Port)
+	s.forwardsMu.Lock()
+	if s.forwards == nil {
+		s.forwards = make(map[uint32]net.Listener)
+	}
+	s.forwards[bound] = l
+	s.forwardsMu.Unlock()
+	if p.BindPort == 0 {
+		req.Reply(true, ssh.Marshal(struct{ Port uint32 }{bound}))
+	} else {
+		req.Reply(true, nil)
+	}
+	go s.forwardAcceptLoop(conn, l, p.BindAddr, bound)
+}
+
+func (s *testSSHServer) forwardAcceptLoop(conn *ssh.ServerConn, l net.Listener, bindAddr string, bound uint32) {
+	for {
+		c, err := l.Accept()
+		if err != nil {
+			return
+		}
+		go func() {
+			defer c.Close()
+			origin := c.RemoteAddr().(*net.TCPAddr)
+			// ConnectedAddr 必须回显客户端请求的 bindAddr,
+			// 否则 x/crypto 客户端按地址分发不到监听器会拒绝通道
+			ch, reqs, err := conn.OpenChannel("forwarded-tcpip", ssh.Marshal(forwardedTCPIPPayload{
+				ConnectedAddr: bindAddr, ConnectedPort: bound,
+				OriginAddr: origin.IP.String(), OriginPort: uint32(origin.Port),
+			}))
+			if err != nil {
+				return
+			}
+			go ssh.DiscardRequests(reqs)
+			go io.Copy(ch, c)
+			io.Copy(c, ch)
+			ch.Close()
+		}()
 	}
 }
 
