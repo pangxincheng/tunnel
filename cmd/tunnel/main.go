@@ -1,11 +1,16 @@
-// tunnel CLI:库包 tunnel 的薄壳。
-//   tunnel server [--local-ssh-port 22]   [--remote-listen-port 5102] [公共参数...]
-//   tunnel client [--local-ssh-port 5102] [--remote-listen-port 5102] [公共参数...]
-// 公共参数:-c/--config(TOML 配置)、--remote-ip / --remote-ssh-port /
-// --remote-ssh-pub / --local-ssh-key / --user
+// tunnel CLI:库包 remote-agent/tunnel 的薄壳。
 //
-// 参数优先级:默认值 < 配置文件 < 命令行 flag。
-// 未指定 -c 时,若 ./tunnel.toml 存在则自动加载。
+// 子命令:
+//
+//	tunnel server  内网侧守护:反向转发(VPS loopback:PORT → 内网 sshd)
+//	tunnel client  客户端守护:正向转发(本机 LISTEN → VPS loopback:PORT)
+//
+// 参数优先级:内置默认值 < TOML 配置文件 < 命令行 flag。
+//
+// 架构说明:server/client 两个子命令在 SSH 协议层面都是"客户端"
+// (都主动向 VPS 发起连接),区别只在转发方向。因此二者复用同一个
+// tunnel.Client 监督循环,方向差异通过 establish 函数注入 ——
+// 详见 cmdServer/cmdClient 中各自的闭包。
 package main
 
 import (
@@ -63,7 +68,12 @@ func usage() {
 }
 
 // findConfigPath 预扫描参数里的 -c/--config(支持分离与 = 两种写法)。
-// 未指定且 ./tunnel.toml 存在时返回该默认路径;都没有返回空串。
+//
+// 为什么要预扫描:标准库 flag 的默认值必须在注册时给出,
+// 而"配置文件充当中间层默认值"要求先知道配置文件路径才能注册 flag。
+// 所以流程是两阶段:先在原始 args 里把 -c 挑出来 → 加载 TOML →
+// 用 TOML 值注册 flag 默认值 → 再正常 Parse(flag 值自然覆盖 TOML)。
+// 未指定 -c 且 ./tunnel.toml 存在时,自动使用该默认路径。
 func findConfigPath(args []string) string {
 	for i, a := range args {
 		if (a == "-c" || a == "--config") && i+1 < len(args) {
@@ -83,6 +93,7 @@ func findConfigPath(args []string) string {
 }
 
 // loadFileConfig 加载 TOML 配置;path 为空返回全零配置(纯 flag 模式)。
+// 显式指定了 -c 但读不到属于用法错误,立即终止(不静默忽略)。
 func loadFileConfig(path string) *tunnel.FileConfig {
 	if path == "" {
 		return &tunnel.FileConfig{}
@@ -103,6 +114,7 @@ type common struct {
 	user          *string
 }
 
+// register 把公共 flag 注册进 fs,默认值依次取:flag > TOML > 内置。
 func (c *common) register(fs *flag.FlagSet, fc *tunnel.FileConfig) {
 	home, _ := os.UserHomeDir()
 	defaultKey := fc.LocalSSHKey
@@ -124,6 +136,7 @@ func (c *common) register(fs *flag.FlagSet, fc *tunnel.FileConfig) {
 	c.user = fs.String("user", defaultUser, "VPS 登录用户")
 }
 
+// config 把合并后的参数组装成库层 Config,并做必填校验。
 func (c *common) config() (*tunnel.Config, error) {
 	if *c.remoteIP == "" {
 		return nil, fmt.Errorf("缺少 --remote-ip(或配置文件 remote_ip)")
@@ -139,16 +152,20 @@ func (c *common) config() (*tunnel.Config, error) {
 	}, nil
 }
 
+// signalCtx 把 SIGINT/SIGTERM 转化为 ctx 取消;
+// Client.Run 检测到取消后会主动断开 SSH 连接并退出。
 func signalCtx() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 }
 
-// configFlag 把 -c/--config 注册进 FlagSet(仅用于通过解析,值已在预扫描阶段消费)。
+// configFlag 把 -c/--config 注册进 FlagSet,使其通过 Parse 校验。
+// 值本身已在预扫描阶段(findConfigPath)消费,这里只为"占位防报错"。
 func configFlag(fs *flag.FlagSet) {
 	fs.String("c", "", "TOML 配置文件")
 	fs.String("config", "", "TOML 配置文件")
 }
 
+// cmdServer 内网侧守护:VPS loopback:PORT → 内网 sshd(反向转发)。
 func cmdServer(args []string) error {
 	fc := loadFileConfig(findConfigPath(args))
 	fs := flag.NewFlagSet("server", flag.ContinueOnError)
@@ -172,6 +189,10 @@ func cmdServer(args []string) error {
 		return err
 	}
 	local := fmt.Sprintf("127.0.0.1:%d", *lsp)
+
+	// establish 闭包(反向转发策略):每条 SSH 连接建立后,
+	// 请求 VPS sshd 在 loopback:PORT 监听,每条外部连接代理到内网 sshd。
+	// 重连时监督循环重新调用本闭包,转发随新连接复活。
 	c := tunnel.NewClient(cfg, func(sc *ssh.Client) (net.Listener, error) {
 		l, err := tunnel.ReverseForward(sc, "127.0.0.1", *rlp, local)
 		if err != nil {
@@ -181,7 +202,7 @@ func cmdServer(args []string) error {
 			for {
 				remote, err := l.Accept()
 				if err != nil {
-					return
+					return // 监听器随连接断开失效,重连由监督循环负责
 				}
 				go tunnel.ProxyToLocal(remote, local)
 			}
@@ -193,6 +214,7 @@ func cmdServer(args []string) error {
 	return c.Run(ctx)
 }
 
+// cmdClient 客户端守护:本机 LISTEN → VPS loopback:PORT(正向转发)。
 func cmdClient(args []string) error {
 	fc := loadFileConfig(findConfigPath(args))
 	fs := flag.NewFlagSet("client", flag.ContinueOnError)
@@ -216,6 +238,10 @@ func cmdClient(args []string) error {
 		return err
 	}
 	target := fmt.Sprintf("127.0.0.1:%d", *rlp)
+
+	// establish 闭包(正向转发策略):本机监听,每条连接经
+	// direct-tcpip 通道请 VPS 代连汇合端口。LocalForward 内部
+	// 自带 accept/代理循环,无需外层再 Accept。
 	c := tunnel.NewClient(cfg, func(sc *ssh.Client) (net.Listener, error) {
 		return tunnel.LocalForward(sc, fmt.Sprintf("127.0.0.1:%d", *lsp), target)
 	})
