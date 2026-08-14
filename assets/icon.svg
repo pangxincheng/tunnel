@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- 圆角底板 -->
+  <rect width="128" height="128" rx="26" fill="#14171d"/>
+  <!-- 中央的"墙"(内网边界) -->
+  <rect x="57" y="30" width="14" height="68" rx="4" fill="#39414f"/>
+  <!-- 穿墙而过的通道(隧道) -->
+  <line x1="18" y1="64" x2="100" y2="64" stroke="#4cc38a" stroke-width="11" stroke-linecap="round"/>
+  <!-- 箭头:穿墙而出 -->
+  <path d="M92 48 L114 64 L92 80 Z" fill="#4cc38a"/>
+</svg>

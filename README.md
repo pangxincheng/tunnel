@@ -1,4 +1,15 @@
-# tunnel
+<p align="center">
+  <img src="assets/icon.svg" width="96" alt="tunnel logo">
+</p>
+
+<h1 align="center">tunnel</h1>
+
+<p align="center">
+  <a href="https://github.com/pangxincheng/remote-agent/actions/workflows/release.yml"><img src="https://github.com/pangxincheng/remote-agent/actions/workflows/release.yml/badge.svg" alt="release"></a>
+  <a href="https://github.com/pangxincheng/remote-agent/releases"><img src="https://img.shields.io/github/v/release/pangxincheng/remote-agent" alt="release version"></a>
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/pangxincheng/remote-agent" alt="go version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="license"></a>
+</p>
 
 通用 SSH 端口转发工具/库。把内网机器的 SSH 服务安全地暴露出来 —— 公网 VPS 上**只需一个 sshd**,不需要部署任何自研服务端。
 

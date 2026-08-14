@@ -21,6 +21,7 @@
 - CLI 参数解析最终定稿为 docopt(参照 pTunnel):usage 文本即语法定义,合并规则 flag > TOML > 内置默认;`--remote-listen-port` 无默认值(部署决策必填),client 的 `--local-ssh-port` 默认跟随汇合端口;移除 urfave/cli 依赖。
 - 修复 README 编译命令:二进制输出改为 `dist/tunnel`(根目录 `./tunnel` 与库源码目录冲突)。
 - 新增 GitHub Actions 发布工作流(`.github/workflows/release.yml`):推送 `v*` tag 触发 → 测试 → linux/windows/darwin × amd64/arm64 六平台交叉编译(`CGO_ENABLED=0`、`-trimpath`、`-ldflags` 注入版本)→ 打包(含 `tunnel.toml.example` 与 `LICENSE`)→ 自动创建 GitHub Release;`tunnel.Version` 由 const 改为 var 以支持注入(默认 "dev")。
+- README 增加图标(`assets/icon.svg`,手绘 SVG:穿墙箭头)与徽章行(CI 状态、最新 release、Go 版本、License);徽章链接按 `pangxincheng/remote-agent` 仓库路径生成,如实际路径不同需调整。
 
 
 ## 2026-08-14(修订 2)
