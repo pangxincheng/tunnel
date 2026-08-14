@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-08-14(实现)
+
+- 新增 `backoff.go`:带 ±20% 抖动的指数退避。
+
+
 ## 2026-08-14(修订 2)
 
 - spec 与实施计划重写:x/crypto/ssh 库(模块根 package tunnel,gomobile 可注入)+ 薄 CLI;命令最终定为 `server`/`client` 双子命令(砍掉 connect);公共参数 `--remote-ip/--remote-ssh-port/--remote-ssh-pub/--local-ssh-key/--user`,主机公钥钉住替代 known_hosts TOFU(确定性模型,移动端注入友好);新增 `docs/superpowers/plans/2026-08-14-tunnel-orchestrator.md`(6 任务)。
