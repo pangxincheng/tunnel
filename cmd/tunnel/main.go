@@ -41,6 +41,8 @@ func main() {
 		err = cmdServer(os.Args[2:])
 	case "client":
 		err = cmdClient(os.Args[2:])
+	case "version":
+		fmt.Printf("tunnel %s\n", tunnel.Version)
 	default:
 		usage()
 		os.Exit(2)
@@ -52,7 +54,14 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `用法:
+	fmt.Fprintln(os.Stderr, `tunnel —— 通用 SSH 端口转发工具(反向/正向转发,断线自动重连)
+
+用法:
+  tunnel server  在内网机器上运行:把内网 sshd 映射到 VPS loopback
+  tunnel client  在客户端运行:把 VPS loopback 的汇合端口拉回本机
+  tunnel version 打印版本
+
+子命令参数:
   tunnel server [--local-ssh-port 22]   [--remote-listen-port 5102] [公共参数...]
   tunnel client [--local-ssh-port 5102] [--remote-listen-port 5102] [公共参数...]
 
@@ -64,7 +73,15 @@ func usage() {
   --local-ssh-key 路径     本机私钥(默认 ~/.ssh/id_ed25519)
   --user 用户              VPS 登录用户(默认 $USER)
 
-参数优先级:默认值 < 配置文件 < 命令行 flag`)
+参数优先级:默认值 < 配置文件 < 命令行 flag
+
+示例:
+  # 内网服务器:
+  tunnel server --remote-ip vps.example.com --remote-ssh-pub ~/.ssh/vps.pub
+  # 客户端:
+  tunnel client --remote-ip vps.example.com --remote-ssh-pub ~/.ssh/vps.pub
+  # 之后即可登入内网:
+  ssh -p 5102 <内网用户>@127.0.0.1`)
 }
 
 // findConfigPath 预扫描参数里的 -c/--config(支持分离与 = 两种写法)。
