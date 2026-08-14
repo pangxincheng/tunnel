@@ -1,0 +1,17 @@
+# tunnel 配置文件示例。未指定 -c 时,CLI 自动读取 ./tunnel.toml。
+# 所有字段可选;同名命令行 flag 覆盖此处的值。
+
+# VPS 地址与 SSH 登录
+remote_ip = "vps.example.com"
+remote_ssh_port = 22
+user = "tunnel"
+
+# 本机私钥(向 VPS 认证)与 VPS 主机公钥(钉住,防冒充)
+local_ssh_key = "~/.ssh/id_ed25519"
+remote_ssh_pub = "~/.ssh/vps_host.pub"   # 也支持内联 "ssh-ed25519 AAAA..."
+
+# server 侧:内网转发目标端口(sshd);client 侧:本机监听端口
+local_ssh_port = 5102
+
+# VPS loopback 上的汇合端口,server/client 必须一致
+remote_listen_port = 5102
