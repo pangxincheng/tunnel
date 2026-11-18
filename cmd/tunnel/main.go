@@ -49,7 +49,7 @@ Options:
   --local-ssh-key=PATH     本机私钥(默认 ~/.ssh/id_ed25519)
   --user=USER              VPS 登录用户(默认 $USER)
   --local-ssh-port=N       本地端口(server: 内网 sshd,默认 22;client: 本机监听,默认跟随汇合端口)
-  --remote-listen-port=N   VPS loopback 汇合端口(必填)
+  --remote-listen-port=N   VPS loopback 汇合端口(server 传 0 = 由 VPS 自动分配,实际端口见启动日志)
 `
 
 func main() {
@@ -92,7 +92,7 @@ func runCmd(args map[string]interface{}, role string, logger *slog.Logger) {
 	if err != nil {
 		fatal(logger, err)
 	}
-	cfg, err := p.config()
+	cfg, err := p.config(role)
 	if err != nil {
 		fatal(logger, err)
 	}
@@ -107,8 +107,15 @@ func runCmd(args map[string]interface{}, role string, logger *slog.Logger) {
 		logger.Info("配置来源", "source", source)
 	}
 	logger.Info("SSH 目标", "addr", cfg.SSHAddr, "user", cfg.User, "key", cfg.KeyPath)
+	vpsListen := remote
+	if p.remoteListenPort == 0 {
+		vpsListen = "自动分配(VPS 选择)"
+	}
 	if role == "server" {
-		logger.Info("反向转发计划", "vps_listen", remote, "inner_target", local)
+		logger.Info("反向转发计划", "vps_listen", vpsListen, "inner_target", local)
+		if p.remoteListenPort == 0 {
+			logger.Info("已启用 VPS 自动分配端口:实际端口见「隧道就绪」日志;重连后会重新分配,需要固定端口时请改用具体值")
+		}
 		err = run(tunnel.NewClient(cfg, tunnel.ReverseForward(remote, local), tunnel.WithLogger(logger)))
 	} else {
 		logger.Info("正向转发计划", "local_listen", local, "vps_target", remote)
@@ -129,17 +136,28 @@ type params struct {
 	user             string
 	localSSHPort     int
 	remoteListenPort int
+	// remoteListenPortSet 区分"未配置"(false)与"显式 0"(true,server 自动分配)。
+	remoteListenPortSet bool
 }
 
-func (p *params) config() (*tunnel.Config, error) {
+func (p *params) config(role string) (*tunnel.Config, error) {
 	if p.remoteIP == "" {
 		return nil, fmt.Errorf("缺少 --remote-ip(或配置文件 remote_ip)")
 	}
 	if p.remoteSSHPub == "" {
 		return nil, fmt.Errorf("缺少 --remote-ssh-pub(或配置文件 remote_ssh_pub)")
 	}
-	if p.remoteListenPort == 0 {
-		return nil, fmt.Errorf("缺少 --remote-listen-port(或配置文件 remote_listen_port)")
+	if !p.remoteListenPortSet {
+		return nil, fmt.Errorf("缺少 --remote-listen-port(或配置文件 remote_listen_port;server 传 0 表示由 VPS 自动分配)")
+	}
+	if p.remoteListenPort < 0 || p.remoteListenPort > 65535 {
+		return nil, fmt.Errorf("--remote-listen-port 超出范围(0-65535):%d", p.remoteListenPort)
+	}
+	if role == "client" && p.remoteListenPort == 0 {
+		return nil, fmt.Errorf("client 模式必须指定 VPS 上的实际端口;自动分配仅限 server,分配结果见 server 的「隧道就绪」日志")
+	}
+	if p.remoteSSHPort < 1 || p.remoteSSHPort > 65535 {
+		return nil, fmt.Errorf("--remote-ssh-port 超出范围(1-65535):%d", p.remoteSSHPort)
 	}
 	return &tunnel.Config{
 		SSHAddr: net.JoinHostPort(p.remoteIP, strconv.Itoa(p.remoteSSHPort)),
@@ -165,19 +183,20 @@ func merge(args map[string]interface{}, fc *tunnel.FileConfig, role string) (*pa
 	if err != nil {
 		return nil, err
 	}
-	remoteListenPort, err := intArg(args, "--remote-listen-port", fc.RemoteListenPort)
+	remoteListenPort, remoteListenPortSet, err := portArg(args, "--remote-listen-port", fc.RemoteListenPort)
 	if err != nil {
 		return nil, err
 	}
 
 	p := &params{
-		remoteIP:         strArg(args, "--remote-ip", fc.RemoteIP),
-		remoteSSHPort:    remoteSSHPort,
-		remoteSSHPub:     strArg(args, "--remote-ssh-pub", fc.RemoteSSHPub),
-		localSSHKey:      strArg(args, "--local-ssh-key", orDefaultStr(fc.LocalSSHKey, filepath.Join(home, ".ssh", "id_ed25519"))),
-		user:             strArg(args, "--user", orDefaultStr(fc.User, os.Getenv("USER"))),
-		localSSHPort:     localSSHPort,
-		remoteListenPort: remoteListenPort,
+		remoteIP:            strArg(args, "--remote-ip", fc.RemoteIP),
+		remoteSSHPort:       remoteSSHPort,
+		remoteSSHPub:        strArg(args, "--remote-ssh-pub", fc.RemoteSSHPub),
+		localSSHKey:         strArg(args, "--local-ssh-key", orDefaultStr(fc.LocalSSHKey, filepath.Join(home, ".ssh", "id_ed25519"))),
+		user:                strArg(args, "--user", orDefaultStr(fc.User, os.Getenv("USER"))),
+		localSSHPort:        localSSHPort,
+		remoteListenPort:    remoteListenPort,
+		remoteListenPortSet: remoteListenPortSet,
 	}
 	// local-ssh-key 的 ~ 展开(docopt 默认值不会展开)
 	p.localSSHKey = expandHome(p.localSSHKey)
@@ -210,6 +229,23 @@ func intArg(args map[string]interface{}, key string, fallback int) (int, error) 
 		return n, nil
 	}
 	return fallback, nil
+}
+
+// portArg 处理"未配置"与"显式 0"语义不同的端口(remote-listen-port)。
+// flag 出现过(哪怕是 0)即视为显式;否则看 TOML 是否定义了该键(指针非 nil)。
+// 返回 (值, 是否显式给出, error)。
+func portArg(args map[string]interface{}, key string, file *int) (int, bool, error) {
+	if v, ok := args[key].(string); ok && v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return 0, false, fmt.Errorf("参数 %s 不是合法数字: %q", key, v)
+		}
+		return n, true, nil
+	}
+	if file != nil {
+		return *file, true, nil
+	}
+	return 0, false, nil
 }
 
 // configPath 取 -c/--config;未指定且 ./tunnel.toml 存在时自动使用。

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-17(自动分配端口)
+
+- server 侧支持 `remote_listen_port = 0`(或 `--remote-listen-port 0`):请求 VPS sshd 自动分配空闲端口,实际端口打印在「隧道就绪」日志中;启动日志会提示重连后可能变化。
+- `FileConfig.RemoteListenPort` 改为 `*int`,区分"未配置"(nil)与"显式 0"(自动分配);未配置仍然报错,client 模式传 0 明确拒绝。
+- 新增端口范围校验(0-65535、remote-ssh-port 1-65535),`portArg` 统一处理"显式 0"语义。
+- `tunnel.toml.example` 与 README 补充自动分配端口说明;新增 TOML 显式 0、CLI 合并与校验测试。
+
 ## 2026-11-17
 
 - 修复 TOML 配置中的 `remote_ssh_port` 永远不生效:docopt 的 `[default: 22]` 被当作显式参数,覆盖了配置文件;默认值改在 `merge` 里兜底,优先级恢复为 默认 < TOML < flag。`cmd/tunnel/main_test.go` 增加合并优先级测试。

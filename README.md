@@ -111,6 +111,21 @@ tunnel client --local-ssh-port 9999   # flag 覆盖配置
 
 优先级:**默认值 < 配置文件 < 命令行 flag**;用 `-c/--config` 指定其他路径。
 
+### 让 VPS 自动分配汇合端口(仅 server)
+
+server 侧把 `remote_listen_port` 设为 `0`(TOML 或 `--remote-listen-port 0`),由 VPS 的 sshd 选择空闲端口:
+
+```bash
+tunnel server --remote-ip vps.example.com --remote-listen-port 0 ...
+# level=INFO msg=反向转发计划 vps_listen="自动分配(VPS 选择)" inner_target=127.0.0.1:22
+# level=INFO msg=隧道就绪 listen=127.0.0.1:38123
+```
+
+把「隧道就绪」日志里的实际端口填给 client 的 `remote_listen_port`。注意:
+
+- 自动分配只适用于 server;client 必须知道实际端口,传 `0` 会直接报错。
+- 断线重连会重新请求分配,端口可能变化(与 `ssh -R 0:...` 一致);需要固定端口时请改用具体值。
+
 ### 日志与故障排查
 
 启动时会打印配置来源、SSH 目标与转发计划,可以直接确认配置文件是否被读取、参数最终生效值:
