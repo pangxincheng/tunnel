@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-17
+
+- 修复 TOML 配置中的 `remote_ssh_port` 永远不生效:docopt 的 `[default: 22]` 被当作显式参数,覆盖了配置文件;默认值改在 `merge` 里兜底,优先级恢复为 默认 < TOML < flag。`cmd/tunnel/main_test.go` 增加合并优先级测试。
+- 启动日志改为 `log/slog`:打印版本/角色、配置来源(显式 `-c`、自动发现 `./tunnel.toml` 或纯命令行)、SSH 目标、私钥路径与转发计划,`tunnel server -c xxx.toml` 可直接确认配置是否被读取。
+- VPS 端口被占用(sshd 拒绝 `tcpip-forward`)时立即报错退出:错误文案包含端口号与 `ss -ltnp | grep ':PORT'` 排查命令,不再每 30 秒静默重试;新增 `RemoteListenError`/`LocalListenError`。
+- 不可恢复错误分类(新增 `ErrPermanent`/`IsPermanent`):私钥读取或解析失败、主机公钥解析或指纹不匹配、SSH 认证失败、本机监听失败、VPS 拒绝监听均快速失败并以退出码 1 结束;网络抖动、对端断开、keepalive 失败仍按指数退避重连。
+- 重连日志带尝试次数、失败原因与下次等待时间;keepalive 探测失败会记录原因,ctx 正常取消时不刷告警。
+- `Client` 新增 `WithLogger` 选项注入 slog 日志器(移动端可传 discard 静默),`NewClient` 保持向后兼容的可变参数签名。
+- README 增加「日志与故障排查」小节(含退出码约定),并修正库示例中过时的 `ReverseForward` 参数签名。
+
 ## 2026-08-14(实现)
 
 - 新增 `backoff.go`:带 ±20% 抖动的指数退避。

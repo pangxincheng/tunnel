@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 )
 
@@ -94,5 +95,56 @@ func TestLocalForwardEndToEnd(t *testing.T) {
 	got, _ := bufio.NewReader(conn).ReadString('\n')
 	if got != "echo: factory\n" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+// TestReverseForwardOccupiedPort:VPS 侧端口被占用时 sshd 只回通用拒绝,
+// 必须转成带排查提示的不可恢复错误,否则 CLI 只会无限重连。
+func TestReverseForwardOccupiedPort(t *testing.T) {
+	privPath, pub := writeClientKey(t)
+	server := startTestSSHServer(t, pub)
+	occupy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupy.Close()
+
+	client, err := Dial(&Config{
+		SSHAddr: server.Addr(), User: "u", KeyPath: privPath,
+		HostPub: writeHostPub(t, server.HostKey),
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer client.Close()
+
+	_, err = ReverseForward(occupy.Addr().String(), "127.0.0.1:22")(client)
+	if err == nil {
+		t.Fatal("端口被占用应返回错误")
+	}
+	if !IsPermanent(err) {
+		t.Fatalf("端口占用应为不可恢复错误: %v", err)
+	}
+	if !strings.Contains(err.Error(), "已被占用") || !strings.Contains(err.Error(), "ss -ltnp") {
+		t.Fatalf("缺少端口占用排查提示: %v", err)
+	}
+}
+
+func TestLocalForwardOccupiedPort(t *testing.T) {
+	occupy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupy.Close()
+
+	_, err = LocalForward(occupy.Addr().String(), "127.0.0.1:22")(nil)
+	if err == nil {
+		t.Fatal("本机端口被占用应返回错误")
+	}
+	if !IsPermanent(err) {
+		t.Fatalf("本机端口占用应为不可恢复错误: %v", err)
+	}
+	if !strings.Contains(err.Error(), "已被占用") {
+		t.Fatalf("缺少端口占用提示: %v", err)
 	}
 }

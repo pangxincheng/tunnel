@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"context"
+	"net"
 	"testing"
 	"time"
 )
@@ -56,4 +57,37 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("条件未在超时内满足")
+}
+
+// TestRunFailsFastOnPermanentError:VPS 端口占用属于不可恢复错误,
+// Run 应立即返回而不是按退避无限重连。
+func TestRunFailsFastOnPermanentError(t *testing.T) {
+	privPath, pub := writeClientKey(t)
+	server := startTestSSHServer(t, pub)
+	occupy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupy.Close()
+
+	cfg := &Config{
+		SSHAddr: server.Addr(), User: "u", KeyPath: privPath,
+		HostPub: writeHostPub(t, server.HostKey),
+	}
+	c := NewClient(cfg, ReverseForward(occupy.Addr().String(), "127.0.0.1:22"))
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	err = c.Run(ctx)
+	if err == nil {
+		t.Fatal("端口占用应返回错误")
+	}
+	if !IsPermanent(err) {
+		t.Fatalf("应为不可恢复错误: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("未快速失败,耗时 %v", elapsed)
+	}
 }

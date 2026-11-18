@@ -111,6 +111,24 @@ tunnel client --local-ssh-port 9999   # flag 覆盖配置
 
 优先级:**默认值 < 配置文件 < 命令行 flag**;用 `-c/--config` 指定其他路径。
 
+### 日志与故障排查
+
+启动时会打印配置来源、SSH 目标与转发计划,可以直接确认配置文件是否被读取、参数最终生效值:
+
+```
+time="2026/11/17 19:12:38" level=INFO msg="tunnel 启动" version=v0.1.0 role=server
+time="2026/11/17 19:12:38" level=INFO msg=配置来源 source="命令行 -c" file=/etc/tunnel/tunnel.toml
+time="2026/11/17 19:12:38" level=INFO msg="SSH 目标" addr=vps.example.com:22 user=tunnel key=/root/.ssh/id_ed25519
+time="2026/11/17 19:12:38" level=INFO msg=反向转发计划 vps_listen=127.0.0.1:5102 inner_target=127.0.0.1:22
+```
+
+- **VPS 端口被占用**:sshd 只会回一个通用的 `request denied`,tunnel 会转成明确错误并提示在 VPS 上执行 `ss -ltnp | grep ':5102'`,随后以退出码 1 终止 —— 不再静默重连。
+- **本机监听端口被占用**:同样立即失败并给出端口占用提示。
+- **私钥/主机公钥/认证错误**:不可恢复,立即退出并指出具体原因。
+- **网络抖动、VPS 重启、连接被断开**:保留指数退避重连,每次失败都会记录错误、尝试次数与下次重试等待时间。
+
+退出码:`0` 正常停止(SIGINT/SIGTERM)、`1` 不可恢复错误、`2` 命令行用法错误。
+
 ## 作为库使用(移动端)
 
 ```go
@@ -128,7 +146,7 @@ c := tunnel.NewClient(cfg, tunnel.LocalForward("127.0.0.1:5102", "127.0.0.1:5102
 c.Run(ctx) // 守护:keepalive + 退避重连
 
 // 反向转发(server 方向):VPS loopback 5102 → 内网 127.0.0.1:22
-// tunnel.NewClient(cfg, tunnel.ReverseForward("127.0.0.1", 5102, "127.0.0.1:22"))
+// tunnel.NewClient(cfg, tunnel.ReverseForward("127.0.0.1:5102", "127.0.0.1:22"))
 ```
 
 `ReverseForward`/`LocalForward` 工厂已内置 listener 创建与 accept/代理循环,开箱即用。

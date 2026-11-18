@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -26,6 +27,11 @@ func ReverseForward(remoteAddr string, localAddr string) func(*ssh.Client) (net.
 	return func(sc *ssh.Client) (net.Listener, error) {
 		l, err := sc.Listen("tcp", remoteAddr)
 		if err != nil {
+			// x/crypto 对 tcpip-forward 被拒只给这一句通用错误,sshd 的真实原因
+			// (端口占用/禁止转发)不会回传;把它归为不可恢复并给出排查提示。
+			if strings.Contains(err.Error(), "tcpip-forward request denied by peer") {
+				return nil, &RemoteListenError{Addr: remoteAddr, Cause: err}
+			}
 			return nil, fmt.Errorf("请求远程转发 %s: %w", remoteAddr, err)
 		}
 		go func() {
@@ -60,7 +66,7 @@ func LocalForward(localAddr string, remoteAddr string) func(*ssh.Client) (net.Li
 	return func(sc *ssh.Client) (net.Listener, error) {
 		listener, err := net.Listen("tcp", localAddr)
 		if err != nil {
-			return nil, fmt.Errorf("本地监听 %s: %w", localAddr, err)
+			return nil, &LocalListenError{Addr: localAddr, Cause: err}
 		}
 		go func() {
 			for {

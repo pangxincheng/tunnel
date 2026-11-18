@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -44,6 +45,13 @@ func Dial(cfg *Config) (*ssh.Client, error) {
 		HostKeyCallback:   pinnedHostKeyCallback(hostKey),
 	})
 	if err != nil {
+		// 认证失败不会因重试而自愈(公钥没配、用户不存在),直接终止。
+		if strings.Contains(err.Error(), "unable to authenticate") {
+			return nil, permanent(fmt.Errorf(
+				"SSH 认证失败(%s,用户 %s):请确认私钥对应的公钥已加入 VPS 的 authorized_keys:%w",
+				cfg.SSHAddr, cfg.User, err,
+			))
+		}
 		return nil, fmt.Errorf("连接 %s: %w", cfg.SSHAddr, err)
 	}
 	return client, nil
@@ -56,16 +64,16 @@ func loadSigner(cfg *Config) (ssh.Signer, error) {
 	if len(pemBytes) == 0 {
 		b, err := os.ReadFile(cfg.KeyPath)
 		if err != nil {
-			return nil, fmt.Errorf("读取私钥 %s: %w", cfg.KeyPath, err)
+			return nil, permanent(fmt.Errorf("读取私钥 %s: %w", cfg.KeyPath, err))
 		}
 		pemBytes = b
 	}
 	signer, err := ssh.ParsePrivateKey(pemBytes)
 	if err != nil {
 		if _, ok := err.(*ssh.PassphraseMissingError); ok {
-			return nil, fmt.Errorf("私钥已加密:请提供未加密私钥(库层密码认证预留给移动端)")
+			return nil, permanent(fmt.Errorf("私钥已加密:请提供未加密私钥(库层密码认证预留给移动端)"))
 		}
-		return nil, fmt.Errorf("解析私钥: %w", err)
+		return nil, permanent(fmt.Errorf("解析私钥: %w", err))
 	}
 	return signer, nil
 }
@@ -79,7 +87,7 @@ func loadHostPub(hostPub string) (ssh.PublicKey, error) {
 	}
 	key, _, _, _, err := ssh.ParseAuthorizedKey([]byte(content))
 	if err != nil {
-		return nil, fmt.Errorf("解析主机公钥(应为 .pub 文件路径或内联 authorized_keys 内容): %w", err)
+		return nil, permanent(fmt.Errorf("解析主机公钥(应为 .pub 文件路径或内联 authorized_keys 内容): %w", err))
 	}
 	return key, nil
 }
@@ -90,7 +98,10 @@ func pinnedHostKeyCallback(want ssh.PublicKey) ssh.HostKeyCallback {
 	wantBytes := want.Marshal()
 	return func(_ string, _ net.Addr, key ssh.PublicKey) error {
 		if !bytes.Equal(key.Marshal(), wantBytes) {
-			return fmt.Errorf("主机公钥不匹配(期望 %s)", ssh.FingerprintSHA256(want))
+			return permanent(fmt.Errorf(
+				"主机公钥不匹配(期望 %s,实际 %s):VPS 主机密钥可能已变更,确认后更新 --remote-ssh-pub",
+				ssh.FingerprintSHA256(want), ssh.FingerprintSHA256(key),
+			))
 		}
 		return nil
 	}

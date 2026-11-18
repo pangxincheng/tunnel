@@ -6,6 +6,7 @@ import (
 	"encoding/pem"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/crypto/ssh"
@@ -76,5 +77,28 @@ func TestDialRejectsWrongHostKey(t *testing.T) {
 	}
 	if _, err := Dial(cfg); err == nil {
 		t.Fatal("主机公钥不匹配应被拒绝")
+	} else if !IsPermanent(err) {
+		t.Fatalf("主机公钥不匹配应为不可恢复错误: %v", err)
+	}
+}
+
+// TestDialAuthFailureIsPermanent:公钥未授权不会因重试而自愈。
+func TestDialAuthFailureIsPermanent(t *testing.T) {
+	_, authorized := writeClientKey(t)
+	server := startTestSSHServer(t, authorized)
+	otherPriv, _ := writeClientKey(t) // 未加入 authorized_keys
+	cfg := &Config{
+		SSHAddr: server.Addr(), User: "u", KeyPath: otherPriv,
+		HostPub: writeHostPub(t, server.HostKey),
+	}
+	_, err := Dial(cfg)
+	if err == nil {
+		t.Fatal("未授权公钥应被拒绝")
+	}
+	if !IsPermanent(err) {
+		t.Fatalf("认证失败应为不可恢复错误: %v", err)
+	}
+	if !strings.Contains(err.Error(), "authorized_keys") {
+		t.Fatalf("缺少排查提示: %v", err)
 	}
 }
