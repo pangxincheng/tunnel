@@ -43,6 +43,7 @@ Usage:
 Options:
   -h --help                帮助
   -c --config=PATH         TOML 配置文件(默认自动读取 ./tunnel.toml)
+  --log-level=LEVEL        日志级别:debug/info/warn/error(默认 info)
   --remote-ip=IP           VPS 地址(必填,可在配置文件中给出)
   --remote-ssh-port=N      VPS sshd 端口(默认 22)
   --remote-ssh-pub=PUB     VPS 主机公钥(钉住;.pub 文件路径或内联 authorized_keys 内容,必填)
@@ -58,7 +59,11 @@ func main() {
 		os.Exit(2) // docopt 已打印用法或错误信息
 	}
 
-	logger := newLogger()
+	logger, err := newLogger(strArg(args, "--log-level", "info"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "tunnel: %v\n", err)
+		os.Exit(2) // 与 docopt 的用法错误保持一致
+	}
 	switch {
 	case args["version"].(bool):
 		fmt.Printf("tunnel %s\n", tunnel.Version)
@@ -69,16 +74,22 @@ func main() {
 	}
 }
 
-// newLogger 构造 CLI 日志器;时间格式与旧 log 包一致,便于沿用现有日志习惯。
-func newLogger() *slog.Logger {
+// newLogger 构造 CLI 日志器;level 接受 debug/info/warn/error(slog 原生解析)。
+// 时间格式与旧 log 包一致,便于沿用现有日志习惯。
+func newLogger(levelName string) (*slog.Logger, error) {
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(levelName)); err != nil {
+		return nil, fmt.Errorf("无效的 --log-level %q(可选 debug/info/warn/error)", levelName)
+	}
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: level,
 		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
 			if a.Key == slog.TimeKey {
 				return slog.String(slog.TimeKey, a.Value.Time().Format("2006/01/02 15:04:05"))
 			}
 			return a
 		},
-	}))
+	})), nil
 }
 
 // runCmd 完成 server/client 的合并、校验与启动;出错即记录并退出。
@@ -116,10 +127,10 @@ func runCmd(args map[string]interface{}, role string, logger *slog.Logger) {
 		if p.remoteListenPort == 0 {
 			logger.Info("已启用 VPS 自动分配端口:实际端口见「隧道就绪」日志;重连后会重新分配,需要固定端口时请改用具体值")
 		}
-		err = run(tunnel.NewClient(cfg, tunnel.ReverseForward(remote, local), tunnel.WithLogger(logger)))
+		err = run(tunnel.NewClient(cfg, tunnel.ReverseForward(remote, local, tunnel.WithForwardLogger(logger)), tunnel.WithLogger(logger)))
 	} else {
 		logger.Info("正向转发计划", "local_listen", local, "vps_target", remote)
-		err = run(tunnel.NewClient(cfg, tunnel.LocalForward(local, remote), tunnel.WithLogger(logger)))
+		err = run(tunnel.NewClient(cfg, tunnel.LocalForward(local, remote, tunnel.WithForwardLogger(logger)), tunnel.WithLogger(logger)))
 	}
 	if err != nil {
 		fatal(logger, err)

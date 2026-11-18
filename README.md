@@ -144,6 +144,15 @@ time="2026/11/17 19:12:38" level=INFO msg=反向转发计划 vps_listen=127.0.0.
 
 退出码:`0` 正常停止(SIGINT/SIGTERM)、`1` 不可恢复错误、`2` 命令行用法错误。
 
+日志级别用 `--log-level=debug|info|warn|error` 控制(默认 `info`,大写亦可):
+
+```bash
+tunnel server -c tunnel.toml --log-level=warn   # 只保留告警与错误
+tunnel server -c tunnel.toml --log-level=debug  # 额外记录每次转发的连接与 keepalive
+```
+
+`debug` 会打印监督循环参数、每条接入连接以及 keepalive 探测结果;每条连接转发失败(内网 sshd 不可达、ssh 通道建立失败)始终以 `WARN` 记录。库层用 `tunnel.WithForwardLogger` / `tunnel.WithLogger` 注入同一个日志器。
+
 ## 作为库使用(移动端)
 
 ```go

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-17(日志级别)
+
+- 新增 `--log-level=debug|info|warn|error`(默认 info,slog 原生解析,大小写不敏感);非法值以退出码 2 报用法错误。
+- `debug` 级别新增内容:监督循环参数、每次转发的接入连接、keepalive 探测成功。
+- 转发工厂新增 `WithForwardLogger` 选项(可变参数,保持向后兼容);每条连接的目标拨号失败以 `WARN` 记录,不再静默丢弃,CLI 已自动注入同一日志器。
+- README 补充日志级别用法。
+
 ## 2026-11-17(自动分配端口)
 
 - server 侧支持 `remote_listen_port = 0`(或 `--remote-listen-port 0`):请求 VPS sshd 自动分配空闲端口,实际端口打印在「隧道就绪」日志中;启动日志会提示重连后可能变化。

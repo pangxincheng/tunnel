@@ -59,6 +59,8 @@ func NewClient(cfg *Config, establish func(*ssh.Client) (net.Listener, error), o
 // 不可恢复错误立即返回,由调用方报告并退出。
 func (c *Client) Run(ctx context.Context) error {
 	backoff := NewBackoff(c.reconnectMin, c.reconnectMax)
+	c.logger.Debug("监督循环参数",
+		"reconnect_min", c.reconnectMin, "reconnect_max", c.reconnectMax, "keepalive", c.keepaliveInterval)
 	attempt := 0
 	for {
 		if ctx.Err() != nil {
@@ -132,6 +134,7 @@ func (c *Client) runOnce(ctx context.Context) (established bool, err error) {
 					sshClient.Close()
 					return
 				}
+				c.logger.Debug("keepalive 探测成功", "addr", c.cfg.SSHAddr)
 			}
 		}
 	}()

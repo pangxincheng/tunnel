@@ -3,6 +3,7 @@ package tunnel
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"strings"
 	"time"
@@ -14,6 +15,31 @@ import (
 // establish 闭包(签名 func(*ssh.Client) (net.Listener, error)),
 // 内含 listener 创建与 accept/代理循环,调用方零胶水。
 
+// ForwardOption 定制转发工厂;目前只有日志器。
+type ForwardOption func(*forwardConfig)
+
+type forwardConfig struct {
+	logger *slog.Logger
+}
+
+// WithForwardLogger 注入 slog 日志器;nil 忽略。默认 slog.Default()。
+// 与 Client 的 WithLogger 分开命名,避免两个 Option 类型混淆。
+func WithForwardLogger(l *slog.Logger) ForwardOption {
+	return func(c *forwardConfig) {
+		if l != nil {
+			c.logger = l
+		}
+	}
+}
+
+func newForwardConfig(opts []ForwardOption) forwardConfig {
+	cfg := forwardConfig{logger: slog.Default()}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	return cfg
+}
+
 // ReverseForward 返回反向转发(server 方向)的 establish 闭包:
 // 请求 VPS 的 sshd 在 remoteAddr 监听(端口写 0 时由服务器分配),
 // 每条外部连接代理到 localAddr。
@@ -23,7 +49,8 @@ import (
 // 封装成 net.Listener。
 //
 //	c := tunnel.NewClient(cfg, tunnel.ReverseForward("127.0.0.1:5102", "127.0.0.1:22"))
-func ReverseForward(remoteAddr string, localAddr string) func(*ssh.Client) (net.Listener, error) {
+func ReverseForward(remoteAddr string, localAddr string, opts ...ForwardOption) func(*ssh.Client) (net.Listener, error) {
+	fc := newForwardConfig(opts)
 	return func(sc *ssh.Client) (net.Listener, error) {
 		l, err := sc.Listen("tcp", remoteAddr)
 		if err != nil {
@@ -41,8 +68,10 @@ func ReverseForward(remoteAddr string, localAddr string) func(*ssh.Client) (net.
 					return // 监听器随连接断开失效,重连由监督循环负责
 				}
 				go func() {
+					fc.logger.Debug("收到反向连接", "remote", remoteAddrString(remote))
 					local, err := net.DialTimeout("tcp", localAddr, 5*time.Second)
 					if err != nil {
+						fc.logger.Warn("连接内网目标失败", "target", localAddr, "err", err)
 						remote.Close()
 						return
 					}
@@ -62,7 +91,8 @@ func ReverseForward(remoteAddr string, localAddr string) func(*ssh.Client) (net.
 // 打通 客户端 → VPS:5102 → 内网服务 的完整链路。
 //
 //	c := tunnel.NewClient(cfg, tunnel.LocalForward("127.0.0.1:5102", "127.0.0.1:5102"))
-func LocalForward(localAddr string, remoteAddr string) func(*ssh.Client) (net.Listener, error) {
+func LocalForward(localAddr string, remoteAddr string, opts ...ForwardOption) func(*ssh.Client) (net.Listener, error) {
+	fc := newForwardConfig(opts)
 	return func(sc *ssh.Client) (net.Listener, error) {
 		listener, err := net.Listen("tcp", localAddr)
 		if err != nil {
@@ -75,9 +105,11 @@ func LocalForward(localAddr string, remoteAddr string) func(*ssh.Client) (net.Li
 					return
 				}
 				go func() {
+					fc.logger.Debug("收到本机连接", "remote", remoteAddrString(local))
 					// Dial 在 SSH 连接上开 direct-tcpip 通道,由 sshd 代连 remoteAddr
 					remote, err := sc.Dial("tcp", remoteAddr)
 					if err != nil {
+						fc.logger.Warn("经 SSH 连接目标失败", "target", remoteAddr, "err", err)
 						local.Close() // 快速失败,不挂起调用方
 						return
 					}
@@ -87,6 +119,14 @@ func LocalForward(localAddr string, remoteAddr string) func(*ssh.Client) (net.Li
 		}()
 		return listener, nil
 	}
+}
+
+// remoteAddrString 安全地取对端地址(x/crypto 某些通道的 RemoteAddr 可能为 nil)。
+func remoteAddrString(c net.Conn) string {
+	if a := c.RemoteAddr(); a != nil {
+		return a.String()
+	}
+	return "unknown"
 }
 
 // proxyBidirectional 双向流式拷贝,任一方向结束即同时关闭两端
