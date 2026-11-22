@@ -583,8 +583,18 @@ func uninstallFlow(env *svcEnv, args map[string]interface{}, raw []string) ([]st
 	p := env.paths(tg.mode, name)
 	fc, cfgErr := tunnel.LoadTOML(filepath.Join(p.ConfigDir, serviceConfig)) // 删除前读出,清理 VPS 用
 
-	if err := mgr.Uninstall(name); err != nil {
-		return nil, fmt.Errorf("停止并删除服务失败(配置已保留,可重新执行 tunnel uninstall):%w", err)
+	// 安装半途失败时只有配置、没有服务登记(Windows 的 schtasks /Delete 对不存在的
+	// 任务会报错):此时跳过 Uninstall,仍继续清理,避免永远卸不掉。
+	registered, err := mgr.Installed(name)
+	if err != nil {
+		return nil, fmt.Errorf("检查服务是否已安装失败:%w", err)
+	}
+	if registered {
+		if err := mgr.Uninstall(name); err != nil {
+			return nil, fmt.Errorf("停止并删除服务失败(配置已保留,可重新执行 tunnel uninstall):%w", err)
+		}
+	} else {
+		env.logger.Warn("系统中没有该服务的登记(可能是安装中途失败),只清理配置与 VPS 上的残留", "service", name)
 	}
 	if cfgErr != nil {
 		env.logger.Warn("读取服务配置失败,跳过 VPS 上的清理", "err", cfgErr)

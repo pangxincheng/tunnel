@@ -178,13 +178,38 @@ func (m *fakeManager) Install(s svc.Spec) error {
 	m.installed = append(m.installed, s)
 	return nil
 }
+
+// Uninstall 像 schtasks /Delete 一样:服务登记不存在时报错。
 func (m *fakeManager) Uninstall(name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if !m.has(name) {
+		return errors.New("找不到任务 " + name)
+	}
 	m.uninstalled = append(m.uninstalled, name)
 	return nil
 }
-func (m *fakeManager) Installed(name string) (bool, error) { return false, nil }
+func (m *fakeManager) Installed(name string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.has(name), nil
+}
+
+// has 报告 name 是否已安装且未卸载;调用方持有 mu。
+func (m *fakeManager) has(name string) bool {
+	n := 0
+	for _, s := range m.installed {
+		if s.Name == name {
+			n = 1
+		}
+	}
+	for _, u := range m.uninstalled {
+		if u == name {
+			n = 0
+		}
+	}
+	return n == 1
+}
 
 type fixture struct {
 	root    string // 一切服务路径的根(临时目录)
@@ -696,5 +721,39 @@ func TestUninstallSystemChecksPrivilege(t *testing.T) {
 	}
 	if _, err := os.Stat(p.ConfigDir); err != nil {
 		t.Fatal("权限不足时不应删除配置")
+	}
+}
+
+// 安装半途失败(配置已写、服务未登记)时,uninstall 仍应成功并清理干净。
+func TestUninstallWithoutRegistration(t *testing.T) {
+	f := newFixture(t)
+	f.mgr.installErr = errors.New("launchctl bootstrap 失败")
+	argv := f.installArgv("user", "--name", "nas")
+	if _, err := installFlow(f.env, parse(t, argv...), argv); err == nil {
+		t.Fatal("Install 失败应报错")
+	}
+	p := f.env.paths(svc.ModeUser, "tunnel-default-nas")
+	if _, err := os.Stat(filepath.Join(p.ConfigDir, "tunnel.toml")); err != nil {
+		t.Fatalf("前提:半途失败后配置仍在: %v", err)
+	}
+	os.MkdirAll(filepath.Dir(p.StatePath), 0o700)
+	os.WriteFile(p.StatePath, []byte(`{"paused":false}`), 0o600)
+	os.WriteFile(filepath.Join(f.sockDir, "nas.json"), []byte(`{"device_id":"`+testDeviceID+`","name":"nas"}`), 0o600)
+
+	f.out.Reset()
+	if code := statusCmd(f.env, parse(t, "status")); code != 3 {
+		t.Fatalf("半途失败应显示已安装,未运行,code=%d", code)
+	}
+	uargv := []string{"uninstall"}
+	if _, err := uninstallFlow(f.env, parse(t, uargv...), uargv); err != nil {
+		t.Fatalf("服务未登记时 uninstall 仍应成功: %v", err)
+	}
+	if len(f.mgr.uninstalled) != 0 {
+		t.Fatal("服务未登记时不应调用 Manager.Uninstall")
+	}
+	for _, gone := range []string{p.ConfigDir, p.StatePath, filepath.Join(f.sockDir, "nas.json")} {
+		if _, err := os.Stat(gone); !os.IsNotExist(err) {
+			t.Fatalf("%s 应被删除", gone)
+		}
 	}
 }
