@@ -172,9 +172,10 @@ type Session struct {
 	logger    *slog.Logger
 	hook      func(ConnState)
 
-	keepaliveInterval time.Duration // 默认 15s,测试可缩短
-	reconnectMin      time.Duration // 默认 1s
-	reconnectMax      time.Duration // 默认 30s
+	keepaliveInterval time.Duration                                    // 默认 15s,测试可缩短
+	reconnectMin      time.Duration                                    // 默认 1s
+	reconnectMax      time.Duration                                    // 默认 30s
+	listen            func(network, addr string) (net.Listener, error) // 默认 net.Listen,测试可替换
 
 	sv *supervisor
 
@@ -210,6 +211,7 @@ func NewSession(cfg *Config, socketDir string, opts ...SessionOption) *Session {
 		keepaliveInterval: 15 * time.Second,
 		reconnectMin:      time.Second,
 		reconnectMax:      30 * time.Second,
+		listen:            net.Listen,
 		forwards:          make(map[string]*sessionForward),
 	}
 	for _, opt := range opts {
@@ -323,6 +325,12 @@ func (f *sessionForward) track(c net.Conn) bool {
 	return true
 }
 
+func (f *sessionForward) isClosed() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.closed
+}
+
 func (f *sessionForward) untrack(c net.Conn) {
 	f.mu.Lock()
 	delete(f.conns, c)
@@ -362,7 +370,7 @@ func (s *Session) AddForward(name string, localPort int) error {
 		delete(s.forwards, name)
 	}
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(localPort))
-	l, err := net.Listen("tcp", addr)
+	l, err := s.listen("tcp", addr)
 	if err != nil {
 		return &LocalListenError{Addr: addr, Cause: err}
 	}
@@ -408,13 +416,27 @@ func (s *Session) closeAllForwards() {
 
 // serveForward 是单个转发的 accept 循环:每条接入连接经当前 SSH 连接
 // 拨到 VPS 上的 socket 并双向代理;未连接或拨号失败立即关闭接入连接。
-// 监听被关闭(RemoveForward / Run 返回)时退出。
+// 只在监听被关闭(RemoveForward / Run 返回)时退出;监听跨重连长期存活,
+// 瞬时 Accept 错误(如 EMFILE)记 Warn 后短暂退避(5ms 起翻倍,封顶 1s)重试,
+// 不能让转发永久失效。
 func (s *Session) serveForward(f *sessionForward) {
+	var delay time.Duration
 	for {
 		in, err := f.l.Accept()
 		if err != nil {
-			return
+			if errors.Is(err, net.ErrClosed) || f.isClosed() {
+				return
+			}
+			if delay == 0 {
+				delay = 5 * time.Millisecond
+			} else if delay *= 2; delay > time.Second {
+				delay = time.Second
+			}
+			s.logger.Warn("本机转发接受连接失败,稍后重试", "name", f.name, "err", err, "retry_in", delay)
+			time.Sleep(delay)
+			continue
 		}
+		delay = 0
 		if !f.track(in) {
 			in.Close()
 			continue

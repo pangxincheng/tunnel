@@ -367,3 +367,40 @@ func TestSessionRunExitClosesForwards(t *testing.T) {
 		t.Fatalf("Run 返回后应为未连接: %v", err)
 	}
 }
+
+// flakyListener 第一次 Accept 返回一个瞬时错误(模拟 EMFILE),之后正常。
+type flakyListener struct {
+	net.Listener
+	once sync.Once
+}
+
+func (l *flakyListener) Accept() (net.Conn, error) {
+	var fail bool
+	l.once.Do(func() { fail = true })
+	if fail {
+		return nil, fmt.Errorf("accept: %w", errors.New("too many open files"))
+	}
+	return l.Listener.Accept()
+}
+
+// TestSessionForwardSurvivesTransientAcceptError:Accept 的瞬时错误不应让转发
+// 永久失效;只有监听被关闭才退出 accept 循环。
+func TestSessionForwardSurvivesTransientAcceptError(t *testing.T) {
+	e := newSessionEnv(t)
+	e.publish(t, "nas")
+	s := newTestSession(e)
+	s.listen = func(network, addr string) (net.Listener, error) {
+		l, err := net.Listen(network, addr)
+		if err != nil {
+			return nil, err
+		}
+		return &flakyListener{Listener: l}, nil
+	}
+	runSession(t, s)
+	waitPhase(t, s, PhaseReady, 3*time.Second)
+	port := freePort(t)
+	if err := s.AddForward("nas", port); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 3*time.Second, func() bool { return echoVia(port) })
+}

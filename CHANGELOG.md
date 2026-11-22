@@ -2,6 +2,7 @@
 
 ## 2026-11-22(tunnel-app 支持)
 
+- `Session` 的本机转发 accept 循环只在监听被关闭(`RemoveForward` / `Run` 返回)时退出;瞬时 Accept 错误(如 EMFILE)记 WARN「本机转发接受连接失败,稍后重试」并退避重试(5ms 起翻倍,封顶 1s),不再让跨重连长期存活的转发静默永久失效。
 - 新增 `Session`(`tunnel/session.go`):一条 SSH 连接承载多个按名字的正向转发。`AddForward(name, port)` 立即在 `127.0.0.1:port` 监听,与连接状态无关(断线期间保持监听、接入连接立即关闭,重连后自动恢复);端口占用返回 `*LocalListenError`,只影响该转发;同名同端口为无操作,换端口先关旧再开新;`RemoveForward` 同时关闭进行中的连接;`Forwards()` 返回名字 → 端口;`Devices(ctx)` 用当前连接列设备,未连接返回新导出的 `ErrNotConnected`;`Run` 返回时关闭全部本机监听。状态以 `ConnState{phase, err, retry_at, attempt}`(`Phase`:connecting/ready/waiting/failed/paused)暴露,支持 `WithStateHook` 回调;不可恢复错误不退出而停在 failed,`RetryNow()` 在退避或 failed 时立即重连并重置退避。监督状态机为未导出的 `supervisor`,供后续 `Share` 复用。
 - `Client` 的 keepalive 循环抽成共用的 `keepalive(ctx, sc, every, logger)`,行为不变(探测成功的 debug 日志 `addr` 改为连接的实际对端地址)。
 - 新增 `ListDevices`(`tunnel/devices.go`):经 SFTP 列出 `*.json` 与 `*.sock` 的并集(只有 socket 的设备仅含名字),对每个名字并发(上限 8)拨号探测 socket,3 秒超时,成功即在线,按名字升序返回 `[]Device`;设备名以文件名为准(json 内 `name` 为空或不一致时仍按文件名探测 `<文件名>.sock`)。
