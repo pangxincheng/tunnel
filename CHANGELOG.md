@@ -2,6 +2,7 @@
 
 ## 2026-11-22(tunnel-app 支持)
 
+- 新增 `ListDevices`(`tunnel/devices.go`):经 SFTP 列出 `*.json` 与 `*.sock` 的并集(只有 socket 的设备仅含名字),对每个名字并发(上限 8)拨号探测 socket,3 秒超时,成功即在线,按名字升序返回 `[]Device`。
 - 新增远端设备信息文件读写(`tunnel/remotefs.go`,经 SFTP,依赖 `github.com/pkg/sftp v1.13.12`):`WriteDeviceInfo`(先写 `<name>.json.tmp` 再 `PosixRename`,原子替换)、`ReadDeviceInfos`(损坏文件以仅含名字的零值收录)、`RemoveDeviceInfo`(仅当 `device_id` 相同才删除)。
 - 新增 `ResolveSocketDir`:未配置目录时先 exec,账户禁止执行命令时改用 SFTP 取家目录并创建 `~/.tunnel/sockets`(0700);SFTP 被明确拒绝(通道/子系统被拒、权限不足)时仍返回原不可恢复的 `SocketDirError`;连接中断等瞬时失败则返回可恢复错误,监督循环会继续重试。`ResolveSocketPath` 改为调用它。测试服务器支持 `sftp` 子系统(`WithServerWorkingDirectory`)与 `DenySFTP`;原先断言 exec 失败即报错的 3 个 `TestResolveSocketPath*` 现同时置 `DenySFTP`(否则 SFTP 兜底会成功)。
 - 新增设备 ID 与本机设备信息(`tunnel/device.go`):`DeviceID()` 取平台机器标识(macOS `IOPlatformUUID`、Linux `/etc/machine-id` 回退 `/var/lib/dbus/machine-id`、Windows 注册表 `MachineGuid`),派生为 `hex(sha256("tunnel-device-id:"+raw)[:16])`;`LocalDeviceInfo(name, startedAt)` 返回含 device_id/name/hostname/os/os_version/arch/tunnel_version/started_at 的 `DeviceInfo`。`golang.org/x/sys` 升为直接依赖(Windows 注册表)。
