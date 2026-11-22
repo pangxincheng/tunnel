@@ -9,6 +9,7 @@ require (
 )
 
 require (
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/pkg/sftp v1.13.12
 	golang.org/x/sys v0.47.0
 )
