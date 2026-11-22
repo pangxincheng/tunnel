@@ -33,10 +33,29 @@ func ResolveSocketDir(sc *ssh.Client, dir string) (string, error) {
 	if !errors.As(err, &sde) {
 		return "", err
 	}
-	if d, ferr := sftpSocketDir(sc); ferr == nil {
+	d, ferr := sftpSocketDir(sc)
+	if ferr == nil {
 		return d, nil
 	}
-	return "", err
+	if sftpRefused(ferr) {
+		return "", err // 两条路都被明确拒绝:保持不可恢复的原错误
+	}
+	// 连接中断等瞬时故障:可恢复,交给监督循环重连重试
+	return "", fmt.Errorf("经 SFTP 解析 VPS socket 目录: %w", ferr)
+}
+
+// sftpRefused 判断 SFTP 是否被服务器明确拒绝(通道被拒、子系统请求被拒、
+// 权限不足),区别于连接中断等瞬时错误。
+func sftpRefused(err error) bool {
+	var oce *ssh.OpenChannelError
+	if errors.As(err, &oce) {
+		return true
+	}
+	var se *sftp.StatusError
+	if errors.As(err, &se) && se.Code == uint32(sftp.ErrSSHFxPermissionDenied) {
+		return true
+	}
+	return strings.Contains(err.Error(), "ssh: subsystem request failed")
 }
 
 func sftpSocketDir(sc *ssh.Client) (string, error) {

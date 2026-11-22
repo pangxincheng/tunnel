@@ -120,3 +120,19 @@ func TestResolveSocketDirBothDenied(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// SFTP 兜底因连接中断失败属瞬时错误:不得被当作不可恢复的 SocketDirError,
+// 否则监督循环会停止重试。
+func TestResolveSocketDirSFTPTransientFailure(t *testing.T) {
+	server, client := dialTestServer(t)
+	server.DenyExec = true
+	server.DropSFTP = true
+	_, err := ResolveSocketDir(client, "")
+	if err == nil {
+		t.Fatal("应报错")
+	}
+	var sde *SocketDirError
+	if IsPermanent(err) || errors.As(err, &sde) {
+		t.Fatalf("瞬时失败不应为不可恢复错误: %v", err)
+	}
+}

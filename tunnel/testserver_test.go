@@ -37,6 +37,7 @@ type testSSHServer struct {
 	Home       string
 	DenyExec   bool
 	DenySFTP   bool // 拒绝 sftp 子系统
+	DropSFTP   bool // 收到 sftp 子系统请求时直接断开连接(模拟瞬时故障)
 	ExecOutput func(cmd string) (stdout string, exit uint32)
 	execMu     sync.Mutex
 	execs      int
@@ -266,7 +267,7 @@ type directTCPIPPayload struct {
 // handleChannel 支持 direct-tcpip:sshd 代客户端连接目标并双向转发。
 func (s *testSSHServer) handleChannel(conn *ssh.ServerConn, ch ssh.NewChannel) {
 	if ch.ChannelType() == "session" {
-		go s.handleSession(ch)
+		go s.handleSession(conn, ch)
 		return
 	}
 	var target net.Conn
@@ -331,7 +332,7 @@ func (s *testSSHServer) defaultExec(cmd string) (string, uint32) {
 }
 
 // handleSession 支持 session 通道上的 exec 与 sftp 子系统请求(其余请求一律拒绝)。
-func (s *testSSHServer) handleSession(nc ssh.NewChannel) {
+func (s *testSSHServer) handleSession(conn *ssh.ServerConn, nc ssh.NewChannel) {
 	ch, reqs, err := nc.Accept()
 	if err != nil {
 		return
@@ -339,6 +340,10 @@ func (s *testSSHServer) handleSession(nc ssh.NewChannel) {
 	defer ch.Close()
 	for req := range reqs {
 		if req.Type == "subsystem" {
+			if s.DropSFTP {
+				conn.Close()
+				return
+			}
 			var p struct{ Name string }
 			if ssh.Unmarshal(req.Payload, &p) != nil || p.Name != "sftp" || s.DenySFTP {
 				req.Reply(false, nil)
