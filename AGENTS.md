@@ -12,13 +12,15 @@
 
 ---
 
-## Deployment
+## Project
 
-This project is deployed through the `nginx-configuration` central deploy tooling. **Read `../nginx-configuration/SKILL.md` and follow it exactly** (the path is relative to this repository's checked-out location inside the `website-pxc` umbrella). The essentials:
+`tunnel-app` is the cross-platform management app for [tunnel](https://github.com/pangxincheng/tunnel) (name-based SSH forwarding through a VPS that runs only sshd). One repository holds both ends:
 
-- Register the service in `nginx-configuration/registry.yaml` (the single source of truth — never bypass it).
-- Provide a `deploy.py` in this repository implementing the contract: `python3 deploy.py` to deploy, `python3 deploy.py --undeploy` to undeploy. There is no positional server argument: `DEPLOY_SERVER` / `DEPLOY_BASE_URL` and `DEPLOY_DIR` (static) or `DEPLOY_PORT` (proxy) arrive via environment variables (see `nginx-configuration/SKILL.md` §三; fallback file `.deploy.env[.<env>]` may only contain these four keys). Exit code 0 on success / non-zero on failure (including when the operator cancels).
-- This repository's `deploy.py` builds / uploads / starts the service only — it must **never** touch nginx (`nginx -t`, `systemctl reload nginx`, uploading nginx config, etc.); nginx is managed exclusively by `nginx-configuration/deploy.py`.
+- `desktop/` — Wails v3 (Go backend + React/TypeScript frontend) for Windows / macOS / Linux: list machines per VPS, toggle forwards to fixed local ports, share this machine (user mode on all OSes; system service on macOS / Linux).
+- `mobile/` — React Native (Expo) for Android / iOS: phase 1 shows machine online status only; Go core reached through gomobile.
+- Go core logic is reused from `github.com/pangxincheng/tunnel`.
+
+This project is **not** deployed through `nginx-configuration`; it ships as desktop / mobile app packages.
 
 ---
 
