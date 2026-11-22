@@ -4,6 +4,9 @@
 //
 //	tunnel server  内网侧守护:反向转发(VPS loopback:PORT 或 VPS socket NAME.sock → 内网 sshd)
 //	tunnel client  客户端守护:正向转发(本机 LISTEN → VPS loopback:PORT 或 VPS socket NAME.sock)
+//	tunnel install / uninstall    以系统服务方式开机自启或登录后运行(按名字共享本机 sshd)
+//	tunnel status / pause / resume / retry  经本机控制通道查看或操作已安装的服务
+//	tunnel run-service            服务进程入口(由服务管理器启动)
 //	tunnel version 打印版本
 //
 // 参数解析采用 docopt:usage 文本即语法定义,ParseArgs 产出 map;
@@ -15,6 +18,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -27,6 +31,7 @@ import (
 
 	"github.com/docopt/docopt-go"
 
+	"github.com/pangxincheng/tunnel/internal/svc"
 	"github.com/pangxincheng/tunnel/tunnel"
 )
 
@@ -38,8 +43,13 @@ const (
 const usageText = `tunnel —— 通用 SSH 端口转发工具(反向/正向转发,断线自动重连)
 
 Usage:
-  tunnel server [options]
-  tunnel client [options]
+  tunnel server [options] [--name=NAME]
+  tunnel client [options] [--name=NAME]
+  tunnel install --mode=MODE [--profile=P] [--name=NAME] [options]
+  tunnel uninstall [--mode=MODE] [--profile=P] [--name=NAME]
+  tunnel status [--mode=MODE] [--profile=P] [--name=NAME] [--json]
+  tunnel (pause|resume|retry) [--mode=MODE] [--profile=P] [--name=NAME]
+  tunnel run-service --mode=MODE --profile=P --name=NAME
   tunnel version
 
 Options:
@@ -55,6 +65,12 @@ Options:
   --remote-listen-port=N   VPS loopback 汇合端口(与 --name 二选一;server 传 0 = 由 VPS 自动分配,实际端口见启动日志)
   --name=NAME              按名字转发:VPS 上 <socket目录>/NAME.sock(与 --remote-listen-port 二选一)
   --remote-socket-dir=DIR  VPS 上的 socket 目录(绝对路径;默认连接后执行 mkdir 解析 $HOME/.tunnel/sockets)
+  --mode=MODE              服务模式:system(开机即运行,需 root,Windows 不支持)/ user(登录后运行)
+  --profile=P              服务器 profile(默认 default 或配置文件 profile;服务名 tunnel-<profile>-<name>)
+  --json                   status 以 JSON 输出
+
+服务命令(install 等)只支持按名字转发,共享本机 127.0.0.1:<local-ssh-port>;
+--mode / --profile / --name 缺省时自动查找已安装的服务。status 退出码 3 = 已安装但未运行。
 `
 
 func main() {
@@ -69,23 +85,81 @@ func main() {
 		os.Exit(2) // 与 docopt 的用法错误保持一致
 	}
 	switch {
-	case args["version"].(bool):
+	case boolArg(args, "version"):
 		fmt.Printf("tunnel %s\n", tunnel.Version)
-	case args["server"].(bool):
+	case boolArg(args, "server"):
 		runCmd(args, "server", logger)
-	case args["client"].(bool):
+	case boolArg(args, "client"):
 		runCmd(args, "client", logger)
+	case boolArg(args, "install"):
+		reexecOrExit(installFlow(defaultEnv(logger), args, os.Args[1:]))
+	case boolArg(args, "uninstall"):
+		reexecOrExit(uninstallFlow(defaultEnv(logger), args, os.Args[1:]))
+	case boolArg(args, "status"):
+		os.Exit(statusCmd(defaultEnv(logger), args))
+	case boolArg(args, "pause"):
+		os.Exit(controlCmd(defaultEnv(logger), args, "pause"))
+	case boolArg(args, "resume"):
+		os.Exit(controlCmd(defaultEnv(logger), args, "resume"))
+	case boolArg(args, "retry"):
+		os.Exit(controlCmd(defaultEnv(logger), args, "retry"))
+	case boolArg(args, "run-service"):
+		runServiceMain(args)
+	}
+}
+
+// reexecOrExit 处理 install / uninstall 的结果:需要提权时以 sudo 替换当前进程,出错退出码 1。
+func reexecOrExit(reexec []string, err error) {
+	if err == nil && reexec != nil {
+		fmt.Fprintln(os.Stderr, "需要 root 权限,正在通过 sudo 重新执行……")
+		err = execReplace(reexec) // 成功时不返回
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "tunnel: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// runServiceMain 是服务进程入口:Windows 先释放控制台并改写日志文件,随后运行到 SIGINT/SIGTERM。
+func runServiceMain(args map[string]interface{}) {
+	detachConsole()
+	mode, err := parseMode(strArg(args, "--mode", ""))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "tunnel: %v\n", err)
+		os.Exit(2)
+	}
+	env := defaultEnv(nil)
+	profile, name := strArg(args, "--profile", ""), strArg(args, "--name", "")
+	out, closeOut, err := serviceLogOutput(env.paths(mode, svc.ServiceName(profile, name)).LogPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "tunnel: 打开日志文件失败: %v\n", err)
+		os.Exit(1)
+	}
+	defer closeOut()
+	env.logger, _ = newLoggerTo(out, "info")
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	err = runService(ctx, env, mode, profile, name)
+	stop()
+	if err != nil {
+		env.logger.Error("共享服务退出", "err", err)
+		closeOut()
+		os.Exit(1)
 	}
 }
 
 // newLogger 构造 CLI 日志器;level 接受 debug/info/warn/error(slog 原生解析)。
 // 时间格式与旧 log 包一致,便于沿用现有日志习惯。
 func newLogger(levelName string) (*slog.Logger, error) {
+	return newLoggerTo(os.Stderr, levelName)
+}
+
+// newLoggerTo 同 newLogger,输出到 w。
+func newLoggerTo(w io.Writer, levelName string) (*slog.Logger, error) {
 	var level slog.Level
 	if err := level.UnmarshalText([]byte(levelName)); err != nil {
 		return nil, fmt.Errorf("无效的 --log-level %q(可选 debug/info/warn/error)", levelName)
 	}
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{
 		Level: level,
 		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
 			if a.Key == slog.TimeKey {
@@ -245,6 +319,12 @@ func (p *params) checkPortMode(role string) error {
 // "用户显式给出",导致 TOML 中的同名端口被静默覆盖。默认值统一在这里兜底。
 func merge(args map[string]interface{}, fc *tunnel.FileConfig, role string) (*params, error) {
 	home, _ := os.UserHomeDir()
+	return mergeWith(args, fc, role, os.Getenv("USER"), home)
+}
+
+// mergeWith 同 merge,但 VPS 登录用户的默认值与 ~ 展开所用的家目录由调用方给出:
+// sudo 运行的 install 用发起 sudo 的用户(SUDO_USER)而不是 root。
+func mergeWith(args map[string]interface{}, fc *tunnel.FileConfig, role, defaultUser, home string) (*params, error) {
 
 	remoteSSHPort, err := intArg(args, "--remote-ssh-port", orDefaultInt(fc.RemoteSSHPort, defaultRemoteSSHPort))
 	if err != nil {
@@ -271,7 +351,7 @@ func merge(args map[string]interface{}, fc *tunnel.FileConfig, role string) (*pa
 		remoteSSHPort:       remoteSSHPort,
 		remoteSSHPub:        strArg(args, "--remote-ssh-pub", fc.RemoteSSHPub),
 		localSSHKey:         strArg(args, "--local-ssh-key", orDefaultStr(fc.LocalSSHKey, filepath.Join(home, ".ssh", "id_ed25519"))),
-		user:                strArg(args, "--user", orDefaultStr(fc.User, os.Getenv("USER"))),
+		user:                strArg(args, "--user", orDefaultStr(fc.User, defaultUser)),
 		localSSHPort:        localSSHPort,
 		remoteListenPort:    remoteListenPort,
 		remoteListenPortSet: remoteListenPortSet,
@@ -279,7 +359,7 @@ func merge(args map[string]interface{}, fc *tunnel.FileConfig, role string) (*pa
 		remoteSocketDir:     strArg(args, "--remote-socket-dir", fc.RemoteSocketDir),
 	}
 	// local-ssh-key 的 ~ 展开(docopt 默认值不会展开)
-	p.localSSHKey = expandHome(p.localSSHKey)
+	p.localSSHKey = expandHomeIn(p.localSSHKey, home)
 
 	if p.localSSHPort == 0 {
 		switch {
@@ -385,13 +465,12 @@ func orDefaultInt(v, def int) int {
 	return def
 }
 
-func expandHome(p string) string {
+// expandHomeIn 用给定家目录展开开头的 ~。
+func expandHomeIn(p, home string) string {
 	if p == "~" {
-		home, _ := os.UserHomeDir()
 		return home
 	}
 	if len(p) > 1 && p[:2] == "~/" {
-		home, _ := os.UserHomeDir()
 		return filepath.Join(home, p[2:])
 	}
 	return p

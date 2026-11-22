@@ -25,3 +25,7 @@ local_ssh_port = 5102
 # VPS loopback 上的汇合端口,server/client 必须一致。
 # server 侧写 0 = 让 VPS 自动分配(实际端口见启动日志;重连会重新分配)。
 remote_listen_port = 5102
+
+# tunnel install 专用:服务器 profile,区分不同的 VPS(服务名 tunnel-<profile>-<name>)。
+# 不写 = default;命令行 --profile 优先。tunnel server / client 忽略此项。
+# profile = "home"
