@@ -115,34 +115,38 @@ func (c *Client) runOnce(ctx context.Context) (established bool, err error) {
 	defer listener.Close()
 	c.logger.Info("隧道就绪", "listen", listener.Addr().String())
 
-	// keepalive:应用层请求,能发现 TCP 层无法感知的对端假死;
-	// 探测失败主动断开,触发重连
-	kaDone := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(c.keepaliveInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-kaDone:
-				return
-			case <-ticker.C:
-				if _, _, err := sshClient.SendRequest("keepalive@openssh.com", true, nil); err != nil {
-					// ctx 取消导致的断开是正常退出,不刷告警
-					if ctx.Err() == nil {
-						c.logger.Warn("keepalive 探测失败,主动断开", "err", err)
-					}
-					sshClient.Close()
-					return
-				}
-				c.logger.Debug("keepalive 探测成功", "addr", c.cfg.SSHAddr)
-			}
-		}
-	}()
-	defer close(kaDone)
+	// keepalive:探测失败主动断开,触发重连
+	kaCtx, stopKA := context.WithCancel(ctx)
+	defer stopKA()
+	go keepalive(kaCtx, sshClient, c.keepaliveInterval, c.logger)
 
 	waitErr := sshClient.Conn.Wait()
 	if waitErr == nil {
 		return true, fmt.Errorf("连接被对端关闭")
 	}
 	return true, waitErr
+}
+
+// keepalive 周期性发送应用层请求 keepalive@openssh.com,能发现 TCP 层无法
+// 感知的对端假死;探测失败时主动关闭 sc(使 Conn.Wait 返回、触发重连)。
+// ctx 取消时退出。Client 与 Session 共用。
+func keepalive(ctx context.Context, sc *ssh.Client, every time.Duration, logger *slog.Logger) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if _, _, err := sc.SendRequest("keepalive@openssh.com", true, nil); err != nil {
+				// ctx 取消导致的断开是正常退出,不刷告警
+				if ctx.Err() == nil {
+					logger.Warn("keepalive 探测失败,主动断开", "err", err)
+				}
+				sc.Close()
+				return
+			}
+			logger.Debug("keepalive 探测成功", "addr", sc.RemoteAddr().String())
+		}
+	}
 }
