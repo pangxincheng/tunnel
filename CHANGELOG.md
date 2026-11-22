@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-22(按名字转发设计)
+
+- 新增设计文档 `docs/superpowers/specs/2026-11-22-name-forwarding-design.md`:server/client 将支持 `--name`,以 VPS 上的 Unix socket(`~/.tunnel/sockets/<name>.sock`)代替 loopback 端口作为汇合点,解决固定端口重连撞车与随机端口难记的问题;端口模式保留。
+
 ## 2026-11-17(日志级别)
 
 - 新增 `--log-level=debug|info|warn|error`(默认 info,slog 原生解析,大小写不敏感);非法值以退出码 2 报用法错误。
