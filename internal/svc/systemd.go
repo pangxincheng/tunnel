@@ -26,7 +26,11 @@ func (m *manager) installSystemd(s Spec) error {
 	if err := m.systemctl("daemon-reload"); err != nil {
 		return err
 	}
-	return m.systemctl("enable", "--now", s.Name)
+	if err := m.systemctl("enable", "--now", s.Name); err != nil {
+		return err
+	}
+	// 重复安装 = 更新:enable --now 不会重启已在运行的单元,显式 restart 以应用新定义。
+	return m.systemctl("restart", s.Name)
 }
 
 func (m *manager) uninstallSystemd(name string) error {

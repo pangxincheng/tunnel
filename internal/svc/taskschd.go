@@ -17,6 +17,8 @@ func (m *manager) installTask(s Spec) error {
 	if err := m.r.Run("schtasks", "/Create", "/TN", s.Name, "/XML", p, "/F"); err != nil {
 		return err
 	}
+	// 任务已在运行时 /Run 会被 IgnoreNew 忽略;先 /End(未运行时失败,忽略)以应用新定义。
+	_ = m.r.Run("schtasks", "/End", "/TN", s.Name)
 	return m.r.Run("schtasks", "/Run", "/TN", s.Name)
 }
 

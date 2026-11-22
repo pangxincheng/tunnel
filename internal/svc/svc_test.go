@@ -138,7 +138,7 @@ func TestInstallCommandSequence(t *testing.T) {
 	if err := m.Install(spec(ModeSystem)); err != nil {
 		t.Fatal(err)
 	}
-	eq(t, r.cmds, []string{"systemctl daemon-reload", "systemctl enable --now tunnel-default-nas"})
+	eq(t, r.cmds, []string{"systemctl daemon-reload", "systemctl enable --now tunnel-default-nas", "systemctl restart tunnel-default-nas"})
 	if !fs.Exists("/etc/systemd/system/tunnel-default-nas.service") {
 		t.Error(fs.files)
 	}
@@ -157,7 +157,7 @@ func TestInstallCommandSequence(t *testing.T) {
 
 	m, r, fs = newMgr(t, ModeUser, "linux")
 	m.Install(spec(ModeUser))
-	eq(t, r.cmds, []string{"systemctl --user daemon-reload", "systemctl --user enable --now tunnel-default-nas"})
+	eq(t, r.cmds, []string{"systemctl --user daemon-reload", "systemctl --user enable --now tunnel-default-nas", "systemctl --user restart tunnel-default-nas"})
 	if !fs.Exists("/home/u/.config/systemd/user/tunnel-default-nas.service") {
 		t.Error(fs.files)
 	}
@@ -185,6 +185,7 @@ func TestInstallCommandSequence(t *testing.T) {
 	xmlPath := `/home/u\AppData\Roaming\tunnel\tunnel-default-nas\task.xml`
 	eq(t, r.cmds, []string{
 		"schtasks /Create /TN tunnel-default-nas /XML " + xmlPath + " /F",
+		"schtasks /End /TN tunnel-default-nas",
 		"schtasks /Run /TN tunnel-default-nas"})
 	b := fs.files[xmlPath]
 	if len(b) < 2 || b[0] != 0xFF || b[1] != 0xFE {
