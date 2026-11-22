@@ -32,7 +32,7 @@ const (
 type ConnState struct {
 	Phase   Phase     `json:"phase"`
 	Err     string    `json:"err"`
-	RetryAt time.Time `json:"retry_at"`
+	RetryAt time.Time `json:"retry_at,omitzero"`
 	Attempt int       `json:"attempt"`
 }
 

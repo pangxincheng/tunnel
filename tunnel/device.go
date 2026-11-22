@@ -46,6 +46,11 @@ func LocalDeviceInfo(name string, startedAt time.Time) (DeviceInfo, error) {
 	if err != nil {
 		return DeviceInfo{}, fmt.Errorf("读取设备 ID 失败: %w", err)
 	}
+	return localDeviceInfo(id, name, startedAt), nil
+}
+
+// localDeviceInfo 用给定的设备 ID 收集本机设备信息(Share 可配置 DeviceID)。
+func localDeviceInfo(id, name string, startedAt time.Time) DeviceInfo {
 	hostname, _ := os.Hostname()
 	osName := runtime.GOOS
 	switch runtime.GOOS {
@@ -65,5 +70,5 @@ func LocalDeviceInfo(name string, startedAt time.Time) (DeviceInfo, error) {
 		Arch:          runtime.GOARCH,
 		TunnelVersion: Version,
 		StartedAt:     startedAt,
-	}, nil
+	}
 }

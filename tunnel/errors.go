@@ -115,3 +115,22 @@ func (e *RemoteSocketListenError) Unwrap() error { return e.Cause }
 func (e *RemoteSocketListenError) Is(target error) bool {
 	return target == ErrPermanent
 }
+
+// NameTakenError 表示 VPS 上的 <name>.json 属于另一台设备(device_id 非空且
+// 与本机不同):继续共享会抢走对方的名字,需要用户换一个名字。
+type NameTakenError struct {
+	Name  string
+	Owner DeviceInfo // 当前占用该名字的设备信息
+}
+
+func (e *NameTakenError) Error() string {
+	owner := e.Owner.Hostname
+	if owner == "" {
+		owner = e.Owner.DeviceID
+	}
+	return fmt.Sprintf("「%s」已被另一台设备(%s)使用,换一个设备名字", e.Name, owner)
+}
+
+func (e *NameTakenError) Is(target error) bool {
+	return target == ErrPermanent
+}
