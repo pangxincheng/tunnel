@@ -463,3 +463,37 @@ func TestShareSetNameRemovesStaleOldSocket(t *testing.T) {
 		t.Fatalf("残留的 nas.sock 应被删除: %v", err)
 	}
 }
+
+func TestShareKeepaliveReplyTimeout(t *testing.T) {
+	e := newShareEnv(t)
+	s := e.newShare(t, "nas")
+	s.keepaliveInterval = 100 * time.Millisecond
+	runShare(t, s)
+	waitSharePhase(t, s, PhaseReady)
+	e.server.IgnoreKeepalive.Store(true)
+	start := time.Now()
+	waitFor(t, 2*time.Second, func() bool { return s.Status().Phase != PhaseReady })
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("离开 ready 用时 %v", d)
+	}
+}
+
+func TestShareRetryInReadyReconnects(t *testing.T) {
+	e := newShareEnv(t)
+	s := e.newShare(t, "nas")
+	s.reconnectMin = 10 * time.Second
+	s.reconnectMax = 10 * time.Second
+	runShare(t, s)
+	waitSharePhase(t, s, PhaseReady)
+	n := e.server.conns()
+	// 模拟半开连接:撤销远端监听的请求也不会有回复,强制重连不能因此卡住
+	e.server.IgnoreKeepalive.Store(true)
+	start := time.Now()
+	s.Retry()
+	waitFor(t, time.Second, func() bool { return e.server.conns() > n })
+	e.server.IgnoreKeepalive.Store(false)
+	waitSharePhase(t, s, PhaseReady)
+	if d := time.Since(start); d > 1500*time.Millisecond {
+		t.Fatalf("Retry 后重新就绪用时 %v", d)
+	}
+}

@@ -404,3 +404,35 @@ func TestSessionForwardSurvivesTransientAcceptError(t *testing.T) {
 	}
 	waitFor(t, 3*time.Second, func() bool { return echoVia(port) })
 }
+
+// 睡眠唤醒后的半开连接:服务器不再回复 keepalive(TCP 不断),
+// 会话应在约 interval + 2×interval 内离开 ready,而不是等内核 TCP 超时。
+func TestSessionKeepaliveReplyTimeout(t *testing.T) {
+	e := newSessionEnv(t)
+	s := newTestSession(e)
+	s.keepaliveInterval = 100 * time.Millisecond
+	runSession(t, s)
+	waitPhase(t, s, PhaseReady, 3*time.Second)
+
+	e.server.IgnoreKeepalive.Store(true)
+	start := time.Now()
+	waitFor(t, 2*time.Second, func() bool { return s.State().Phase != PhaseReady })
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("离开 ready 用时 %v,应在约 3×interval 内", d)
+	}
+}
+
+// RetryNow 在 ready 时强制断开当前连接并立即重连(不走退避)。
+func TestSessionRetryNowInReadyReconnects(t *testing.T) {
+	e := newSessionEnv(t)
+	s := newTestSession(e)
+	s.reconnectMin = 10 * time.Second
+	s.reconnectMax = 10 * time.Second
+	runSession(t, s)
+	waitPhase(t, s, PhaseReady, 3*time.Second)
+	n := e.server.conns()
+
+	s.RetryNow()
+	waitFor(t, time.Second, func() bool { return e.server.conns() > n })
+	waitPhase(t, s, PhaseReady, time.Second)
+}

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/pkg/sftp"
@@ -41,6 +42,9 @@ type testSSHServer struct {
 	ExecOutput func(cmd string) (stdout string, exit uint32)
 	execMu     sync.Mutex
 	execs      int
+
+	// IgnoreKeepalive 模拟睡眠唤醒后的半开连接:TCP 仍在,但 keepalive 请求不再有回复。
+	IgnoreKeepalive atomic.Bool
 
 	// BindUnlink 模拟 sshd 的 StreamLocalBindUnlink(默认开启):绑定前删除残留 socket。
 	BindUnlink   bool
@@ -115,6 +119,9 @@ func (s *testSSHServer) handleGlobalRequests(conn *ssh.ServerConn, reqs <-chan *
 	for req := range reqs {
 		switch req.Type {
 		case "keepalive@openssh.com":
+			if s.IgnoreKeepalive.Load() {
+				continue
+			}
 			req.Reply(true, nil)
 		case "tcpip-forward":
 			s.handleForwardRequest(conn, req)
@@ -380,6 +387,13 @@ func (s *testSSHServer) handleSession(conn *ssh.ServerConn, nc ssh.NewChannel) {
 		ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{status}))
 		return
 	}
+}
+
+// conns 返回累计接入的连接数。
+func (s *testSSHServer) conns() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.totalConns
 }
 
 // CloseAllClients 强制断开所有已接入的客户端(重连测试用)。

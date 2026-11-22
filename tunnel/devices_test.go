@@ -1,6 +1,9 @@
 package tunnel
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -94,5 +97,35 @@ func TestListDevicesFilenameIsAuthoritative(t *testing.T) {
 	if len(got) != 2 || got[0].Name != "empty" || got[0].Online || got[0].DeviceID != "d2" ||
 		got[1].Name != "x" || !got[1].Online || got[1].DeviceID != "d1" {
 		t.Fatalf("got %+v", got)
+	}
+}
+
+// ctx 已取消时应返回 ctx.Err(),而不是「全部离线」且 err 为 nil。
+func TestListDevicesCancelledContext(t *testing.T) {
+	_, client := dialTestServer(t)
+	dir := mkSockDir(t)
+	if _, err := ReverseForwardUnix(dir, "macmini", startEchoServer(t))(client); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	got, err := ListDevices(ctx, client, dir)
+	if !errors.Is(err, context.Canceled) || got != nil {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+}
+
+func TestDeviceJSONKeys(t *testing.T) {
+	data, err := json.Marshal(Device{DeviceInfo: DeviceInfo{Name: "a"}, Online: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	json.Unmarshal(data, &m)
+	if m["online"] != true {
+		t.Fatalf("Online 应序列化为 online: %s", data)
+	}
+	if _, ok := m["Online"]; ok {
+		t.Fatalf("不应出现 Online 键: %s", data)
 	}
 }

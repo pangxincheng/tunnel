@@ -16,7 +16,7 @@ import (
 // Device 是服务器上的一台设备:设备信息加在线状态。
 type Device struct {
 	DeviceInfo
-	Online bool
+	Online bool `json:"online"`
 }
 
 const (
@@ -27,6 +27,7 @@ const (
 
 // ListDevices 列出 dir 下所有 *.json 与 *.sock 对应的设备(只有 socket 没有
 // json 的设备仅 Name 有值),并发探测每个 socket 是否在线,按 Name 升序返回。
+// ctx 被取消时返回 ctx.Err()。
 func ListDevices(ctx context.Context, sc *ssh.Client, dir string) ([]Device, error) {
 	infos, err := ReadDeviceInfos(sc, dir)
 	if err != nil {
@@ -61,6 +62,10 @@ func ListDevices(ctx context.Context, sc *ssh.Client, dir string) ([]Device, err
 		}(&devices[i])
 	}
 	wg.Wait()
+	// 取消时探测结果不可信(全部记为离线),不能当作「全部离线」返回
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return devices, nil
 }
 

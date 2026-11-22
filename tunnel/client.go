@@ -128,8 +128,8 @@ func (c *Client) runOnce(ctx context.Context) (established bool, err error) {
 }
 
 // keepalive 周期性发送应用层请求 keepalive@openssh.com,能发现 TCP 层无法
-// 感知的对端假死;探测失败时主动关闭 sc(使 Conn.Wait 返回、触发重连)。
-// ctx 取消时退出。Client 与 Session 共用。
+// 感知的对端假死;探测失败或 2×every 内没有回复(睡眠唤醒后的半开连接)时
+// 主动关闭 sc(使 Conn.Wait 返回、触发重连)。ctx 取消时退出。Client 与 Session 共用。
 func keepalive(ctx context.Context, sc *ssh.Client, every time.Duration, logger *slog.Logger) {
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
@@ -138,7 +138,23 @@ func keepalive(ctx context.Context, sc *ssh.Client, every time.Duration, logger 
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if _, _, err := sc.SendRequest("keepalive@openssh.com", true, nil); err != nil {
+			reply := make(chan error, 1)
+			go func() {
+				_, _, err := sc.SendRequest("keepalive@openssh.com", true, nil)
+				reply <- err
+			}()
+			timer := time.NewTimer(2 * every)
+			var err error
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case err = <-reply:
+				timer.Stop()
+			case <-timer.C:
+				err = fmt.Errorf("%v 内无回复", 2*every)
+			}
+			if err != nil {
 				// ctx 取消导致的断开是正常退出,不刷告警
 				if ctx.Err() == nil {
 					logger.Warn("keepalive 探测失败,主动断开", "err", err)

@@ -2,6 +2,9 @@
 
 ## 2026-11-22(tunnel-app 支持)
 
+- 修复睡眠唤醒后半开连接长时间停在 ready(终审 I1):共用的 `keepalive` 在 2×间隔内收不到回复即关闭连接(Client / Session / Share 都受益,检测上限约 3×keepalive 间隔);`RetryNow()` / `Share.Retry()` 在 ready 时强制断开当前连接并立即重连、重置退避(Share 此时跳过需要对端回复的远端监听撤销,不会卡 2 秒)。测试服务器新增 `IgnoreKeepalive`(TCP 不断、keepalive 不回复)。
+- user 模式控制通道目录加固(终审 I2):`ControlListen(addr, -1)` 要求父目录属于当前用户、权限恰为 0700 且不是符号链接(缺失时以 0700 创建),否则报错拒绝监听,防止 `/tmp` 下被其他本机用户预先占位。
+- `ListDevices` 在 ctx 取消时返回 `ctx.Err()`,不再返回「全部离线」且 err 为 nil(终审 M1);`Device.Online` 的 JSON 键改为 `online`(终审 M2,其余跨控制通道 / JSON 的导出结构已核对均有 snake_case 标签)。
 - CLI 新增服务子命令(`cmd/tunnel/service.go`):`tunnel install --mode system|user [--profile P] --name NAME [server 的全部参数]` 依次执行权限检查(system 非 root:有终端时经 `sudo` 以绝对路径重新执行自身、参数原样,无终端报「--mode system 需要 root 权限,请用 sudo 运行」;user 以 root 运行报「--mode user 不能以 root 运行(会装进 root 自己的登录项,永远不会启动)」)→ 合并参数(只支持名字模式,端口模式报「tunnel install 只支持 --name 按名字转发」)→ 实际连一次 VPS 并解析 socket 目录(失败退出码 1、不写任何文件)→ 写服务配置目录 `tunnel.toml`(0600,主机公钥内联)→ system 模式复制私钥为 `id_key`(0600)并记录安装用户 UID 到 `owner` → 复制自身到固定位置(临时文件 + 重命名)→ 创建日志目录(launchd 不会自动创建)→ `Manager.Install`;重复执行即覆盖并重启。sudo 下 VPS 用户默认值、`~` 展开与控制通道属主取 `SUDO_USER` / `SUDO_UID`。
 - `tunnel run-service`:读服务配置 → `NewShare` → 控制通道(system 模式属主为安装用户)→ `Share.Run`,SIGINT/SIGTERM 优雅退出;`set-name` 原子改写配置中的 `name`(服务名不变)。Windows 下启动即 `FreeConsole` 释放控制台,日志改为追加写入服务目录下的 `tunnel.log`。
 - `tunnel status [--json]` / `pause` / `resume` / `retry`:经控制通道读取或操作;`--mode` / `--profile` / `--name` 缺省时依次查找 user、system 中已安装的服务(两种模式都有时要求 `--mode`,profile 下多个服务时要求 `--name`);已安装但控制通道连不上输出「已安装,未运行」、退出码 3,无权访问控制通道时报错、退出码 1。

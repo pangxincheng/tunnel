@@ -46,10 +46,16 @@ type supervisor struct {
 	logger *slog.Logger
 	hook   func(ConnState)
 
-	mu    sync.Mutex
-	state ConnState
-	retry chan struct{} // 容量 1,RetryNow 的信号
+	mu        sync.Mutex
+	state     ConnState
+	retry     chan struct{}           // 容量 1,RetryNow 的信号
+	dropConn  context.CancelCauseFunc // 取消当前这次连接;未在连接中时为 nil
+	forceNext bool                    // RetryNow 在 ready 时强制断开:下一次连接不走退避
 }
+
+// errRetryNow 是 RetryNow 在 ready 时取消当前连接的原因(context.Cause)。
+// connect 可据此跳过需要对端回复的善后步骤(连接可能已是半开的)。
+var errRetryNow = errors.New("收到立即重连请求")
 
 func newSupervisor(logger *slog.Logger, hook func(ConnState)) *supervisor {
 	return &supervisor{
@@ -77,11 +83,17 @@ func (sv *supervisor) set(st ConnState) {
 	}
 }
 
-// RetryNow 只在 waiting / failed 时生效:立即开始下一次连接并重置退避。
-// 其他阶段调用为无操作(不会让下一次断线跳过退避)。
+// RetryNow 在 waiting / failed 时立即开始下一次连接并重置退避;在 ready 时
+// 强制断开当前连接(睡眠唤醒后连接可能已是半开的)并立即重连、重置退避。
+// connecting 等其他阶段调用为无操作(不会让之后的断线跳过退避)。
 func (sv *supervisor) RetryNow() {
 	sv.mu.Lock()
 	defer sv.mu.Unlock()
+	if sv.state.Phase == PhaseReady && sv.dropConn != nil {
+		sv.forceNext = true
+		sv.dropConn(errRetryNow)
+		return
+	}
 	if sv.state.Phase != PhaseWaiting && sv.state.Phase != PhaseFailed {
 		return
 	}
@@ -107,12 +119,33 @@ func (sv *supervisor) run(ctx context.Context, min, max time.Duration,
 		attempt++
 		sv.set(ConnState{Phase: PhaseConnecting, Err: lastErr, Attempt: attempt})
 		var readyAt time.Time
-		err := connect(ctx, func() {
+		connCtx, drop := context.WithCancelCause(ctx)
+		sv.mu.Lock()
+		sv.dropConn, sv.forceNext = drop, false
+		sv.mu.Unlock()
+		err := connect(connCtx, func() {
 			readyAt = time.Now()
 			sv.set(ConnState{Phase: PhaseReady, Attempt: attempt})
 		})
+		sv.mu.Lock()
+		sv.dropConn = nil
+		forced := sv.forceNext
+		sv.forceNext = false
+		sv.mu.Unlock()
+		drop(nil)
 		if ctx.Err() != nil {
 			return nil
+		}
+		if forced {
+			// RetryNow 在 ready 时断开:立即重连并重置退避
+			sv.logger.Info("收到重试请求,断开当前连接并立即重连")
+			lastErr = errRetryNow.Error()
+			backoff.Reset()
+			select {
+			case <-sv.retry:
+			default:
+			}
+			continue
 		}
 		if err == nil {
 			err = errors.New("连接结束")
@@ -230,7 +263,8 @@ func (s *Session) Run(ctx context.Context) error {
 	return s.sv.run(ctx, s.reconnectMin, s.reconnectMax, s.connectOnce)
 }
 
-// RetryNow 在退避等待或 Failed 时立即开始下一次连接,并重置退避。
+// RetryNow 在退避等待或 Failed 时立即开始下一次连接,并重置退避;在 ready 时
+// 断开当前连接并立即重连(系统从睡眠唤醒或网络变化时调用)。
 func (s *Session) RetryNow() { s.sv.RetryNow() }
 
 // State 返回当前状态快照。

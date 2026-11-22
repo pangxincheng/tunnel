@@ -243,7 +243,8 @@ func (s *Share) setPaused(paused bool) error {
 	return nil
 }
 
-// Retry 在退避等待或 failed 时立即重连并重置退避;其他阶段(含暂停)无操作。
+// Retry 在退避等待或 failed 时立即重连并重置退避;在 ready 时断开当前连接并
+// 立即重连(睡眠唤醒后用);其他阶段(含暂停)无操作。
 func (s *Share) Retry() { s.sv.RetryNow() }
 
 // SetName 改用新名字共享:断开当前连接,下次连上后删除旧名字的本机信息
@@ -305,7 +306,8 @@ func (s *Share) connectOnce(ctx context.Context, ready func()) error {
 		lmu.Lock()
 		l := fwd
 		lmu.Unlock()
-		if l != nil {
+		// RetryNow 强制断开时连接可能已半开,撤销请求不会有回复,直接关闭
+		if l != nil && !errors.Is(context.Cause(ctx), errRetryNow) {
 			done := make(chan struct{})
 			go func() { l.Close(); close(done) }()
 			select {

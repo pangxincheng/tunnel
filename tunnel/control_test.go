@@ -155,3 +155,47 @@ func TestControlServerSurvivesStuckClient(t *testing.T) {
 		t.Fatalf("卡住的客户端不应阻塞其他请求: %+v, %v", resp, err)
 	}
 }
+
+// user 模式(ownerUID < 0)的控制通道目录(如 /tmp/tunnel-<uid>)必须属于当前用户且权限恰为 0700:
+// 缺失时以 0700 创建;属于他人、权限更宽或是符号链接时拒绝监听。
+func TestControlListenPrivateDir(t *testing.T) {
+	base, err := os.MkdirTemp("/tmp", "ctl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(base) })
+
+	// 缺失 → 创建为 0700
+	addr := filepath.Join(base, "tunnel-1", "a.sock")
+	l, err := ControlListen(addr, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.Close()
+	if fi, err := os.Lstat(filepath.Dir(addr)); err != nil || fi.Mode().Perm() != 0o700 {
+		t.Fatalf("目录应为 0700: %v %v", fi.Mode(), err)
+	}
+
+	// 权限更宽 → 拒绝
+	wide := filepath.Join(base, "wide")
+	os.Mkdir(wide, 0o700)
+	os.Chmod(wide, 0o755)
+	if _, err := ControlListen(filepath.Join(wide, "a.sock"), -1); err == nil || !strings.Contains(err.Error(), "0700") {
+		t.Fatalf("权限 0755 的目录应被拒绝: %v", err)
+	}
+
+	// 符号链接 → 拒绝
+	link := filepath.Join(base, "link")
+	os.Symlink(filepath.Dir(addr), link)
+	if _, err := ControlListen(filepath.Join(link, "b.sock"), -1); err == nil {
+		t.Fatal("符号链接目录应被拒绝")
+	}
+
+	// 属于其他用户 → 拒绝
+	old := controlGeteuid
+	controlGeteuid = func() int { return os.Geteuid() + 1 }
+	t.Cleanup(func() { controlGeteuid = old })
+	if _, err := ControlListen(filepath.Join(filepath.Dir(addr), "c.sock"), -1); err == nil || !strings.Contains(err.Error(), "属主") {
+		t.Fatalf("属于其他用户的目录应被拒绝: %v", err)
+	}
+}
