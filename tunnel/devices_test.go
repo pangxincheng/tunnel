@@ -73,3 +73,26 @@ func TestListDevicesStaleSocket(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 }
+
+func TestListDevicesFilenameIsAuthoritative(t *testing.T) {
+	_, client := dialTestServer(t)
+	dir := mkSockDir(t)
+	if _, err := ReverseForwardUnix(dir, "x", startEchoServer(t))(client); err != nil {
+		t.Fatal(err)
+	}
+	// x.json 内的 name 与文件名不一致;empty.json 的 name 为空
+	if err := os.WriteFile(filepath.Join(dir, "x.json"), []byte(`{"device_id":"d1","name":"other"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "empty.json"), []byte(`{"device_id":"d2"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ListDevices(t.Context(), client, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Name != "empty" || got[0].Online || got[0].DeviceID != "d2" ||
+		got[1].Name != "x" || !got[1].Online || got[1].DeviceID != "d1" {
+		t.Fatalf("got %+v", got)
+	}
+}

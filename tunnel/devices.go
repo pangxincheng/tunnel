@@ -42,7 +42,9 @@ func ListDevices(ctx context.Context, sc *ssh.Client, dir string) ([]Device, err
 		}
 	}
 	devices := make([]Device, 0, len(infos))
-	for _, info := range infos {
+	for key, info := range infos {
+		// 文件名是身份与探测的依据,不信任 json 内的 name(可能为空或不一致)
+		info.Name = key
 		devices = append(devices, Device{DeviceInfo: info})
 	}
 	sort.Slice(devices, func(i, j int) bool { return devices[i].Name < devices[j].Name })
