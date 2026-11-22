@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-22(按名字转发)
+
+- 新增 `ValidateName` / `ResolveSocketPath`(`tunnel/socket.go`):校验服务名(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`),并解析 VPS 上的 socket 路径 `<dir>/<name>.sock`;未指定目录时经 SSH exec 执行 `mkdir -p -m 700 "$HOME/.tunnel/sockets"` 自动创建并取回绝对路径,路径超过 103 字节报不可恢复错误。
+- 新增 `SocketDirError`:账户不允许执行命令时给出配置 `remote_socket_dir` 的提示。
+- 测试 SSH 服务器支持 session/exec;新增实现计划 `docs/superpowers/plans/2026-11-22-name-forwarding.md`。
+
 ## 2026-11-22(按名字转发设计)
 
 - 新增设计文档 `docs/superpowers/specs/2026-11-22-name-forwarding-design.md`:server/client 将支持 `--name`,以 VPS 上的 Unix socket(`~/.tunnel/sockets/<name>.sock`)代替 loopback 端口作为汇合点,解决固定端口重连撞车与随机端口难记的问题;端口模式保留。

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -27,6 +29,15 @@ type testSSHServer struct {
 
 	forwardsMu sync.Mutex
 	forwards   map[uint32]net.Listener
+
+	// exec 模拟:Home 是假 $HOME(放 /tmp 下,避免 macOS 上 socket 路径超长);
+	// DenyExec 模拟 nologin/ForceCommand 账户;ExecOutput 为 nil 时
+	// 只认 DefaultSocketDirCommand。
+	Home       string
+	DenyExec   bool
+	ExecOutput func(cmd string) (stdout string, exit uint32)
+	execMu     sync.Mutex
+	execs      int
 }
 
 func startTestSSHServer(t *testing.T, authorized ssh.PublicKey) *testSSHServer {
@@ -50,6 +61,12 @@ func startTestSSHServer(t *testing.T, authorized ssh.PublicKey) *testSSHServer {
 	}
 	s.config.AddHostKey(edSigner)
 	s.config.AddHostKey(ecSigner)
+
+	s.Home, err = os.MkdirTemp("/tmp", "tn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(s.Home) })
 
 	s.listener, err = net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -184,6 +201,10 @@ type directTCPIPPayload struct {
 
 // handleChannel 支持 direct-tcpip:sshd 代客户端连接目标并双向转发。
 func (s *testSSHServer) handleChannel(conn *ssh.ServerConn, ch ssh.NewChannel) {
+	if ch.ChannelType() == "session" {
+		go s.handleSession(ch)
+		return
+	}
 	if ch.ChannelType() != "direct-tcpip" {
 		ch.Reject(ssh.UnknownChannelType, "unsupported")
 		return
@@ -210,6 +231,57 @@ func (s *testSSHServer) handleChannel(conn *ssh.ServerConn, ch ssh.NewChannel) {
 		go io.Copy(channel, target)
 		io.Copy(target, channel)
 	}()
+}
+
+func (s *testSSHServer) execCount() int {
+	s.execMu.Lock()
+	defer s.execMu.Unlock()
+	return s.execs
+}
+
+// defaultExec 只认 DefaultSocketDirCommand:在 Home 下建目录并输出绝对路径。
+func (s *testSSHServer) defaultExec(cmd string) (string, uint32) {
+	if cmd != DefaultSocketDirCommand {
+		return "", 127
+	}
+	dir := filepath.Join(s.Home, ".tunnel", "sockets")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", 1
+	}
+	os.Chmod(dir, 0o700)
+	return dir + "\n", 0
+}
+
+// handleSession 支持 session 通道上的 exec 请求(其余请求一律拒绝)。
+func (s *testSSHServer) handleSession(nc ssh.NewChannel) {
+	ch, reqs, err := nc.Accept()
+	if err != nil {
+		return
+	}
+	defer ch.Close()
+	for req := range reqs {
+		if req.Type != "exec" {
+			req.Reply(false, nil)
+			continue
+		}
+		var p struct{ Command string }
+		if ssh.Unmarshal(req.Payload, &p) != nil || s.DenyExec {
+			req.Reply(false, nil)
+			return
+		}
+		s.execMu.Lock()
+		s.execs++
+		s.execMu.Unlock()
+		req.Reply(true, nil)
+		run := s.ExecOutput
+		if run == nil {
+			run = s.defaultExec
+		}
+		out, status := run(p.Command)
+		io.WriteString(ch, out)
+		ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{status}))
+		return
+	}
 }
 
 // CloseAllClients 强制断开所有已接入的客户端(重连测试用)。

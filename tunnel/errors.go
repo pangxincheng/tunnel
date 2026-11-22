@@ -70,3 +70,23 @@ func (e *LocalListenError) Unwrap() error { return e.Cause }
 func (e *LocalListenError) Is(target error) bool {
 	return target == ErrPermanent
 }
+
+// SocketDirError 表示未配置 remote_socket_dir 时,无法在 VPS 上自动解析
+// socket 目录(多见于 shell 为 nologin 或设置了 ForceCommand 的纯转发账户)。
+type SocketDirError struct {
+	Cause error
+}
+
+func (e *SocketDirError) Error() string {
+	return fmt.Sprintf(
+		"无法在 VPS 上自动创建 socket 目录(%v)。若该账户不允许执行命令,"+
+			"请配置 remote_socket_dir(--remote-socket-dir,绝对路径),"+
+			"并在 VPS 上预先创建该目录并 chmod 700",
+		e.Cause,
+	)
+}
+
+func (e *SocketDirError) Unwrap() error { return e.Cause }
+func (e *SocketDirError) Is(target error) bool {
+	return target == ErrPermanent
+}
