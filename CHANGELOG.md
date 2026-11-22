@@ -2,6 +2,12 @@
 
 ## 2026-11-22(tunnel-app 支持)
 
+- 每个服务器 profile 一个共享服务(终审 I3):`svc.ServiceName(profile)` → `tunnel-<profile>`,设备名字只保存在服务配置中,set-name 不改变服务身份;`status` / `pause` / `resume` / `retry` / `uninstall` 按 `--profile`(默认 `default`)定位,不再接受 `--name`;`run-service` 只带 `--mode --profile`;同一 profile 已以另一种模式安装时 `install` 报「已以 <mode> 方式安装,请先 tunnel uninstall --mode <mode>」,同一模式重复安装即更新(换名字时用验证连接顺带删除 VPS 上本机旧名字的设备信息)。原来按目录名前缀列举服务、`-` 歧义(M5)随之消失。
+- 控制 socket 路径缩短(终审 I2):macOS user 模式与没有 `XDG_RUNTIME_DIR` 的 Linux user 模式改为 `/tmp/tunnel-<uid>/<服务名>.sock`(目录由 `ControlListen` 校验属主与 0700);任何 Unix 控制 socket 完整路径超过 100 字节时文件名改用 `hex(sha256(服务名))[:12].sock`。
+- 安装用户解析(终审 I4):`tunnel install` 新增 `--for-user=USERNAME`(只用于 `--mode system`);安装用户(VPS 用户默认值、`~` 展开、家目录、控制通道属主)按 `--for-user` → `SUDO_USER` / `SUDO_UID` → 当前用户确定,用户名、UID、家目录取自同一用户(用户查询可注入测试);`status` 等命令同样按 `SUDO_*` 定位安装用户的家目录。
+- Windows 任务(终审 I5 / I6):任务 XML 的 `LogonTrigger` 与 `Principal` 都写入当前账户 `<UserId>DOMAIN\user</UserId>`(`Spec.User`,来自 `os/user`),交互令牌、最低权限,普通用户可注册;`BinPath` 改为每个服务一份 `%LOCALAPPDATA%\tunnel\<服务名>\tunnel.exe`,`Manager` 新增 `Stop`(Windows `schtasks /End`,其他平台无操作),install 复制二进制前先结束本服务的任务(忽略错误)。
+- README / `tunnel.toml.example`(终审 M6):卸载说明改为「Linux journal 与 macOS system 日志保留,macOS user 与 Windows 日志随配置目录删除」;示例配置注释掉 `remote_listen_port`(install 只支持 name);补充 `--for-user`、每个 profile 一个服务 `tunnel-<profile>`、控制通道位置与真机验证中的普通用户安装检查。
+- [pending] tunnel-app: 设计文档 §6.4/§9 服务名改为 tunnel-<profile>,并补充 --for-user
 - 修复睡眠唤醒后半开连接长时间停在 ready(终审 I1):共用的 `keepalive` 在 2×间隔内收不到回复即关闭连接(Client / Session / Share 都受益,检测上限约 3×keepalive 间隔);`RetryNow()` / `Share.Retry()` 在 ready 时强制断开当前连接并立即重连、重置退避(Share 此时跳过需要对端回复的远端监听撤销,不会卡 2 秒)。测试服务器新增 `IgnoreKeepalive`(TCP 不断、keepalive 不回复)。
 - user 模式控制通道目录加固(终审 I2):`ControlListen(addr, -1)` 要求父目录属于当前用户、权限恰为 0700 且不是符号链接(缺失时以 0700 创建),否则报错拒绝监听,防止 `/tmp` 下被其他本机用户预先占位。
 - `ListDevices` 在 ctx 取消时返回 `ctx.Err()`,不再返回「全部离线」且 err 为 nil(终审 M1);`Device.Online` 的 JSON 键改为 `online`(终审 M2,其余跨控制通道 / JSON 的导出结构已核对均有 snake_case 标签)。

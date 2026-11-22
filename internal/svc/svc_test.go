@@ -1,6 +1,9 @@
 package svc
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/xml"
 	"errors"
 	"strings"
 	"testing"
@@ -35,14 +38,17 @@ func (f *fakeFS) Remove(p string) error {
 func (f *fakeFS) Exists(p string) bool { _, ok := f.files[p]; return ok }
 
 func TestServiceName(t *testing.T) {
-	if got := ServiceName("default", "nas"); got != "tunnel-default-nas" {
+	if got := ServiceName("default"); got != "tunnel-default" {
 		t.Fatal(got)
 	}
 }
 
 func TestPathsForTable(t *testing.T) {
 	t.Setenv("XDG_RUNTIME_DIR", "/run/user/1000")
-	const s = "tunnel-default-nas"
+	old := getuid
+	getuid = func() int { return 501 }
+	t.Cleanup(func() { getuid = old })
+	const s = "tunnel-default"
 	type c struct {
 		mode       Mode
 		goos, home string
@@ -52,8 +58,8 @@ func TestPathsForTable(t *testing.T) {
 		{ModeSystem, "linux", "/home/u", Paths{"/etc/tunnel/" + s, "/var/lib/tunnel/" + s + "/state.json", "/run/tunnel/" + s + ".sock", "/usr/local/bin/tunnel", ""}},
 		{ModeSystem, "darwin", "/Users/u", Paths{"/etc/tunnel/" + s, "/var/lib/tunnel/" + s + "/state.json", "/var/run/tunnel/" + s + ".sock", "/usr/local/bin/tunnel", "/var/log/tunnel/" + s + ".log"}},
 		{ModeUser, "linux", "/home/u", Paths{"/home/u/.config/tunnel/" + s, "/home/u/.config/tunnel/" + s + "/state.json", "/run/user/1000/tunnel/" + s + ".sock", "/home/u/.local/bin/tunnel", ""}},
-		{ModeUser, "darwin", "/Users/u", Paths{"/Users/u/Library/Application Support/tunnel/" + s, "/Users/u/Library/Application Support/tunnel/" + s + "/state.json", "/Users/u/Library/Application Support/tunnel/" + s + "/control.sock", "/Users/u/Library/Application Support/tunnel/bin/tunnel", "/Users/u/Library/Application Support/tunnel/" + s + "/tunnel.log"}},
-		{ModeUser, "windows", `C:\Users\u`, Paths{`C:\Users\u\AppData\Roaming\tunnel\` + s, `C:\Users\u\AppData\Roaming\tunnel\` + s + `\state.json`, `\\.\pipe\tunnel-` + s, `C:\Users\u\AppData\Local\tunnel\tunnel.exe`, `C:\Users\u\AppData\Roaming\tunnel\` + s + `\tunnel.log`}},
+		{ModeUser, "darwin", "/Users/u", Paths{"/Users/u/Library/Application Support/tunnel/" + s, "/Users/u/Library/Application Support/tunnel/" + s + "/state.json", "/tmp/tunnel-501/" + s + ".sock", "/Users/u/Library/Application Support/tunnel/bin/tunnel", "/Users/u/Library/Application Support/tunnel/" + s + "/tunnel.log"}},
+		{ModeUser, "windows", `C:\Users\u`, Paths{`C:\Users\u\AppData\Roaming\tunnel\` + s, `C:\Users\u\AppData\Roaming\tunnel\` + s + `\state.json`, `\\.\pipe\tunnel-` + s, `C:\Users\u\AppData\Local\tunnel\` + s + `\tunnel.exe`, `C:\Users\u\AppData\Roaming\tunnel\` + s + `\tunnel.log`}},
 	}
 	for _, tc := range cases {
 		if got := PathsFor(tc.mode, s, tc.goos, tc.home); got != tc.want {
@@ -62,8 +68,31 @@ func TestPathsForTable(t *testing.T) {
 	}
 	t.Setenv("XDG_RUNTIME_DIR", "")
 	got := PathsFor(ModeUser, s, "linux", "/home/u")
-	if got.ControlAddr != "/home/u/.config/tunnel/"+s+"/control.sock" {
+	if got.ControlAddr != "/tmp/tunnel-501/"+s+".sock" {
 		t.Error(got.ControlAddr)
+	}
+}
+
+// 控制 socket 完整路径超过 100 字节时,文件名改用 hex(sha256(svc))[:12].sock。
+func TestControlSockLengthFallback(t *testing.T) {
+	long := "tunnel-" + strings.Repeat("p", 64) // 最长的服务名
+	sum := sha256.Sum256([]byte(long))
+	short := hex.EncodeToString(sum[:])[:12] + ".sock"
+
+	t.Setenv("XDG_RUNTIME_DIR", "/run/user/1000/"+strings.Repeat("x", 20))
+	got := PathsFor(ModeUser, long, "linux", "/home/u").ControlAddr
+	if got != "/run/user/1000/"+strings.Repeat("x", 20)+"/tunnel/"+short || len(got) > 100 {
+		t.Errorf("超长路径应回退为短文件名: %q", got)
+	}
+	// 未超长时保持可读的服务名
+	if got := controlSock("/tmp/tunnel-501", long); got != "/tmp/tunnel-501/"+long+".sock" {
+		t.Errorf("got %q", got)
+	}
+	if got := controlSock("/tmp/"+strings.Repeat("d", 90), "tunnel-x"); got != "/tmp/"+strings.Repeat("d", 90)+"/"+func() string {
+		s := sha256.Sum256([]byte("tunnel-x"))
+		return hex.EncodeToString(s[:])[:12]
+	}()+".sock" {
+		t.Errorf("got %q", got)
 	}
 }
 
@@ -100,15 +129,34 @@ func TestRenderLaunchdPlist(t *testing.T) {
 }
 
 func TestRenderTaskXML(t *testing.T) {
-	sp := Spec{Name: "tunnel-default-nas", Exec: `C:\Users\u\AppData\Local\tunnel\tunnel.exe`, Args: []string{"run-service", "--name", `my "nas" & co`}}
+	sp := Spec{Name: "tunnel-default", User: `PC\alice&co`, Exec: `C:\Users\u\AppData\Local\tunnel\tunnel-default\tunnel.exe`, Args: []string{"run-service", "--profile", `my "nas" & co`}}
 	x := renderTaskXML(sp)
 	for _, w := range []string{"<LogonTrigger>", "<RestartOnFailure>", "<Interval>PT1M</Interval>", "<Count>999</Count>",
 		"<Hidden>true</Hidden>", "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>",
-		`<Command>C:\Users\u\AppData\Local\tunnel\tunnel.exe</Command>`,
-		`<Arguments>run-service --name &#34;my \&#34;nas\&#34; &amp; co&#34;</Arguments>`} {
+		`<Command>C:\Users\u\AppData\Local\tunnel\tunnel-default\tunnel.exe</Command>`,
+		`<Arguments>run-service --profile &#34;my \&#34;nas\&#34; &amp; co&#34;</Arguments>`} {
 		if !strings.Contains(x, w) {
 			t.Errorf("missing %q in\n%s", w, x)
 		}
+	}
+	// 结构检查:登录触发器与 Principal 都限定为当前用户,以交互令牌、最低权限运行
+	var task struct {
+		Trigger struct {
+			UserID string `xml:"UserId"`
+		} `xml:"Triggers>LogonTrigger"`
+		Principal struct {
+			UserID    string `xml:"UserId"`
+			LogonType string `xml:"LogonType"`
+			RunLevel  string `xml:"RunLevel"`
+		} `xml:"Principals>Principal"`
+	}
+	dec := xml.NewDecoder(strings.NewReader(strings.Replace(x, `encoding="UTF-16"`, `encoding="UTF-8"`, 1)))
+	if err := dec.Decode(&task); err != nil {
+		t.Fatalf("任务 XML 不合法: %v\n%s", err, x)
+	}
+	if task.Trigger.UserID != `PC\alice&co` || task.Principal.UserID != `PC\alice&co` ||
+		task.Principal.LogonType != "InteractiveToken" || task.Principal.RunLevel != "LeastPrivilege" {
+		t.Fatalf("got %+v", task)
 	}
 }
 
@@ -211,5 +259,21 @@ func TestWindowsSystemUnsupported(t *testing.T) {
 	_, err := NewManager(ModeSystem, "windows", `C:\Users\u`, &fakeRunner{})
 	if err == nil || !strings.Contains(err.Error(), "Windows 暂不支持开机即运行(--mode system)") {
 		t.Fatal(err)
+	}
+}
+
+// Stop 只在 Windows 上结束正在运行的任务(复制新的 tunnel.exe 前调用);其他平台无操作。
+func TestStop(t *testing.T) {
+	m, r, _ := newMgr(t, ModeUser, "windows")
+	if err := m.Stop("tunnel-default"); err != nil {
+		t.Fatal(err)
+	}
+	eq(t, r.cmds, []string{"schtasks /End /TN tunnel-default"})
+	for _, goos := range []string{"linux", "darwin"} {
+		m, r, _ := newMgr(t, ModeUser, goos)
+		if err := m.Stop("tunnel-default"); err != nil {
+			t.Fatal(err)
+		}
+		eq(t, r.cmds, nil)
 	}
 }

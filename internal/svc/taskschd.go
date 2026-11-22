@@ -71,6 +71,12 @@ func renderTaskXML(s Spec) string {
 	for i, a := range s.Args {
 		args[i] = winQuote(a)
 	}
+	// 不带 UserId 的登录触发器表示「任何用户登录」,注册需要管理员权限;
+	// 限定为当前用户后普通用户即可注册。
+	userID := ""
+	if s.User != "" {
+		userID = "\n      <UserId>" + xmlEsc(s.User) + "</UserId>"
+	}
 	return `<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
@@ -78,11 +84,11 @@ func renderTaskXML(s Spec) string {
   </RegistrationInfo>
   <Triggers>
     <LogonTrigger>
-      <Enabled>true</Enabled>
+      <Enabled>true</Enabled>` + userID + `
     </LogonTrigger>
   </Triggers>
   <Principals>
-    <Principal id="Author">
+    <Principal id="Author">` + userID + `
       <LogonType>InteractiveToken</LogonType>
       <RunLevel>LeastPrivilege</RunLevel>
     </Principal>

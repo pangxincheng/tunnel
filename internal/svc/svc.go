@@ -17,8 +17,9 @@ const (
 	ModeUser   Mode = "user"
 )
 
-// ServiceName 返回服务名 tunnel-<profile>-<name>。
-func ServiceName(profile, name string) string { return "tunnel-" + profile + "-" + name }
+// ServiceName 返回服务名 tunnel-<profile>:每个服务器 profile 在本机只有一个共享服务,
+// 设备名字只保存在服务配置里,改名不改变服务身份。
+func ServiceName(profile string) string { return "tunnel-" + profile }
 
 // Spec 描述要安装的服务。Name 为 ServiceName 的结果。
 type Spec struct {
@@ -27,6 +28,7 @@ type Spec struct {
 	Exec    string
 	Args    []string
 	LogPath string
+	User    string // Windows:任务所属账户(DOMAIN\user),登录触发器与 Principal 都限定为它
 }
 
 // Runner 执行外部命令。
@@ -76,6 +78,9 @@ type Manager interface {
 	Install(Spec) error
 	Uninstall(name string) error
 	Installed(name string) (bool, error)
+	// Stop 结束正在运行的服务进程,便于随后替换其二进制;只有 Windows 需要
+	// (运行中的 exe 不能被覆盖),其他平台为无操作。未在运行时可能返回错误,调用方可忽略。
+	Stop(name string) error
 }
 
 // Option 调整 NewManager 的可注入依赖。
@@ -137,6 +142,13 @@ func (m *manager) Uninstall(name string) error {
 	default:
 		return m.uninstallTask(name)
 	}
+}
+
+func (m *manager) Stop(name string) error {
+	if m.goos != "windows" {
+		return nil
+	}
+	return m.r.Run("schtasks", "/End", "/TN", name)
 }
 
 func (m *manager) Installed(name string) (bool, error) {

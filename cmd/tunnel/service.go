@@ -38,9 +38,10 @@ const (
 // svcEnv 是服务子命令的全部外部依赖。
 type svcEnv struct {
 	goos       string
-	home       string // 安装用户的家目录(sudo 下为 SUDO_USER 的家目录)
+	home       string // 安装用户的家目录(applyOwner 之后为 --for-user / SUDO_USER 的家目录)
 	user       string // 安装用户名(VPS 登录用户的默认值)
 	ownerUID   int    // system 模式控制通道的属主(安装用户 UID)
+	account    string // Windows 任务所属账户(DOMAIN\user)
 	euid       int
 	isTerminal bool
 	exe        string // 当前可执行文件
@@ -50,24 +51,21 @@ type svcEnv struct {
 	manager    func(mode svc.Mode) (svc.Manager, error)
 	dial       func(*tunnel.Config) (*ssh.Client, error)
 	deviceID   func() (string, error)
+
+	// 安装用户解析(applyOwner)用到的环境变量与用户查询
+	getenv       func(string) string
+	lookupUser   func(name string) (*osuser.User, error)
+	lookupUserID func(uid string) (*osuser.User, error)
 }
 
-// defaultEnv 返回真实环境。以 root 运行且存在 SUDO_USER 时,默认 VPS 用户、
-// ~ 展开与控制通道属主都取发起 sudo 的用户,而不是 root。
+// defaultEnv 返回真实环境,安装用户先取当前用户;以 root 运行时由 applyOwner
+// 按 --for-user / SUDO_USER / SUDO_UID 改为实际的安装用户。
 func defaultEnv(logger *slog.Logger) *svcEnv {
 	home, _ := os.UserHomeDir()
 	userName := os.Getenv("USER")
-	euid := os.Geteuid()
-	owner := os.Getuid()
-	if euid == 0 {
-		if su := os.Getenv("SUDO_USER"); su != "" {
-			if u, err := osuser.Lookup(su); err == nil {
-				userName, home = su, u.HomeDir
-			}
-		}
-		if n, err := strconv.Atoi(os.Getenv("SUDO_UID")); err == nil {
-			owner = n
-		}
+	account := userName
+	if u, err := osuser.Current(); err == nil {
+		account = u.Username
 	}
 	exe, err := os.Executable()
 	if err == nil {
@@ -80,23 +78,65 @@ func defaultEnv(logger *slog.Logger) *svcEnv {
 		isTerminal = fi.Mode()&os.ModeCharDevice != 0
 	}
 	goos := runtime.GOOS
-	return &svcEnv{
-		goos:       goos,
-		home:       home,
-		user:       userName,
-		ownerUID:   owner,
-		euid:       euid,
-		isTerminal: isTerminal,
-		exe:        exe,
-		stdout:     os.Stdout,
-		logger:     logger,
-		paths:      func(m svc.Mode, n string) svc.Paths { return svc.PathsFor(m, n, goos, home) },
-		manager: func(m svc.Mode) (svc.Manager, error) {
-			return svc.NewManager(m, goos, home, svc.ExecRunner{})
-		},
-		dial:     tunnel.Dial,
-		deviceID: tunnel.DeviceID,
+	env := &svcEnv{
+		goos:         goos,
+		home:         home,
+		user:         userName,
+		ownerUID:     os.Getuid(),
+		account:      account,
+		euid:         os.Geteuid(),
+		isTerminal:   isTerminal,
+		exe:          exe,
+		stdout:       os.Stdout,
+		logger:       logger,
+		dial:         tunnel.Dial,
+		deviceID:     tunnel.DeviceID,
+		getenv:       os.Getenv,
+		lookupUser:   osuser.Lookup,
+		lookupUserID: osuser.LookupId,
 	}
+	// 路径与服务管理器在调用时读取 env.home(applyOwner 可能已改为安装用户的家目录)
+	env.paths = func(m svc.Mode, n string) svc.Paths { return svc.PathsFor(m, n, goos, env.home) }
+	env.manager = func(m svc.Mode) (svc.Manager, error) {
+		return svc.NewManager(m, goos, env.home, svc.ExecRunner{})
+	}
+	return env
+}
+
+// applyOwner 确定安装用户(VPS 用户默认值、~ 展开、家目录、system 模式控制通道属主):
+// --for-user 优先(只用于 --mode system,供 osascript / pkexec 等不设置 SUDO_* 的提权方式使用),
+// 其次以 root 运行时的 SUDO_USER、SUDO_UID,否则保持当前用户。用户名、UID 与家目录
+// 总是来自同一个用户,不会混用。
+func applyOwner(env *svcEnv, mode svc.Mode, forUser string) error {
+	var u *osuser.User
+	var err error
+	switch {
+	case forUser != "":
+		if mode != svc.ModeSystem {
+			return errors.New("--for-user 只用于 --mode system(user 模式的服务总是属于当前用户)")
+		}
+		if u, err = env.lookupUser(forUser); err != nil {
+			return fmt.Errorf("找不到 --for-user 指定的用户 %s:%w", forUser, err)
+		}
+	case env.euid == 0 && env.getenv("SUDO_USER") != "":
+		su := env.getenv("SUDO_USER")
+		if u, err = env.lookupUser(su); err != nil {
+			return fmt.Errorf("找不到 SUDO_USER 指定的用户 %s(可用 --for-user 指定):%w", su, err)
+		}
+	case env.euid == 0 && env.getenv("SUDO_UID") != "":
+		id := env.getenv("SUDO_UID")
+		if u, err = env.lookupUserID(id); err != nil {
+			return fmt.Errorf("找不到 SUDO_UID 对应的用户 %s(可用 --for-user 指定):%w", id, err)
+		}
+	default:
+		return nil
+	}
+	uid, err := strconv.Atoi(u.Uid)
+	if err != nil {
+		return fmt.Errorf("用户 %s 的 UID 不是数字:%q", u.Username, u.Uid)
+	}
+	env.user, env.home, env.ownerUID, env.account = u.Username, u.HomeDir, uid, u.Username
+	return nil
 }
 
 // serviceFile 是写入 ConfigDir/tunnel.toml 的内容(键与 tunnel.toml 相同)。
@@ -138,6 +178,9 @@ func installFlow(env *svcEnv, args map[string]interface{}, raw []string) ([]stri
 	if re, err := checkPrivilege(mode, env.euid, env.isTerminal, raw); err != nil || re != nil {
 		return re, err
 	}
+	if err := applyOwner(env, mode, strArg(args, "--for-user", "")); err != nil {
+		return nil, err
+	}
 	mgr, err := env.manager(mode)
 	if err != nil {
 		return nil, err
@@ -159,6 +202,22 @@ func installFlow(env *svcEnv, args map[string]interface{}, raw []string) ([]stri
 	if err := tunnel.ValidateName(profile); err != nil {
 		return nil, fmt.Errorf("profile 不合法:%w", err)
 	}
+	// 每个 profile 只有一个共享服务:另一种模式已安装时拒绝,同一模式重复安装即更新
+	if env.goos != "windows" {
+		other := svc.ModeUser
+		if mode == svc.ModeUser {
+			other = svc.ModeSystem
+		}
+		if installedAt(env, other, profile) {
+			return nil, fmt.Errorf("已以 %s 方式安装,请先 tunnel uninstall --mode %s", other, other)
+		}
+	}
+	name := svc.ServiceName(profile)
+	paths := env.paths(mode, name)
+	var oldName string // 更新安装前的设备名字;换名字时删除 VPS 上旧名字的设备信息
+	if old, err := tunnel.LoadTOML(filepath.Join(paths.ConfigDir, serviceConfig)); err == nil {
+		oldName = old.Name
+	}
 	cfg, err := p.config("server")
 	if err != nil {
 		return nil, err
@@ -179,14 +238,22 @@ func installFlow(env *svcEnv, args map[string]interface{}, raw []string) ([]stri
 		return nil, fmt.Errorf("连接 VPS 失败,未安装:%w", err)
 	}
 	dir, err := tunnel.ResolveSocketDir(sc, p.remoteSocketDir)
-	sc.Close()
 	if err != nil {
+		sc.Close()
 		return nil, fmt.Errorf("解析 VPS socket 目录失败,未安装:%w", err)
 	}
 	env.logger.Info("VPS 连接正常", "socket_dir", dir)
+	if oldName != "" && oldName != p.name {
+		if id, err := env.deviceID(); err != nil {
+			env.logger.Warn("读取设备 ID 失败,未删除旧名字的设备信息", "name", oldName, "err", err)
+		} else if err := tunnel.RemoveDevice(sc, dir, oldName, id); err != nil {
+			env.logger.Warn("删除 VPS 上旧名字的设备信息失败(其他设备会看到它离线)", "name", oldName, "err", err)
+		} else {
+			env.logger.Info("设备名字已修改,已删除 VPS 上旧名字的设备信息", "old", oldName, "name", p.name)
+		}
+	}
+	sc.Close()
 
-	name := svc.ServiceName(profile, p.name)
-	paths := env.paths(mode, name)
 	dirPerm := os.FileMode(0o700)
 	if mode == svc.ModeSystem {
 		dirPerm = 0o755 // 非 root 的 status 需要能看到服务;配置与私钥本身仍为 0600
@@ -227,6 +294,8 @@ func installFlow(env *svcEnv, args map[string]interface{}, raw []string) ([]stri
 	if err := writeServiceConfig(cfgPath, sf); err != nil {
 		return nil, fmt.Errorf("写入服务配置失败:%w", err)
 	}
+	// Windows 上运行中的 tunnel.exe 不能被替换:先结束本服务的任务(未运行时报错,忽略)
+	_ = mgr.Stop(name)
 	if err := copySelf(env.exe, paths.BinPath); err != nil {
 		return nil, fmt.Errorf("复制 tunnel 到 %s 失败:%w", paths.BinPath, err)
 	}
@@ -240,14 +309,15 @@ func installFlow(env *svcEnv, args map[string]interface{}, raw []string) ([]stri
 		Name:    name,
 		Mode:    mode,
 		Exec:    paths.BinPath,
-		Args:    []string{"run-service", "--mode", string(mode), "--profile", profile, "--name", p.name},
+		Args:    []string{"run-service", "--mode", string(mode), "--profile", profile},
 		LogPath: paths.LogPath,
+		User:    env.account,
 	}
 	if err := mgr.Install(spec); err != nil {
 		return nil, fmt.Errorf("安装服务失败(可修正后重新执行 tunnel install):%w", err)
 	}
 
-	sel := fmt.Sprintf("--mode %s --profile %s --name %s", mode, profile, p.name)
+	sel := fmt.Sprintf("--mode %s --profile %s", mode, profile)
 	sudo := ""
 	if mode == svc.ModeSystem {
 		sudo = "sudo "
@@ -383,86 +453,54 @@ func logHint(goos string, mode svc.Mode, name string, p svc.Paths) string {
 type target struct {
 	mode    svc.Mode
 	profile string
-	name    string
 }
 
-func (t target) service() string { return svc.ServiceName(t.profile, t.name) }
+func (t target) service() string { return svc.ServiceName(t.profile) }
 
-// installedNames 列出 mode 下 profile 的已安装服务(以 ConfigDir/tunnel.toml 为准)的名字。
-func installedNames(env *svcEnv, mode svc.Mode, profile string) []string {
-	prefix := svc.ServiceName(profile, "")
-	parent := filepath.Dir(env.paths(mode, prefix+"x").ConfigDir)
-	entries, err := os.ReadDir(parent)
-	if err != nil {
-		return nil
-	}
-	var names []string
-	for _, e := range entries {
-		n := strings.TrimPrefix(e.Name(), prefix)
-		if !e.IsDir() || n == e.Name() || tunnel.ValidateName(n) != nil {
-			continue
-		}
-		cfg := filepath.Join(env.paths(mode, e.Name()).ConfigDir, serviceConfig)
-		if _, err := os.Stat(cfg); err != nil {
-			continue
-		}
-		// profile 含 "-" 时目录名有歧义,能读到配置就按其中的 profile 核对
-		// (system 模式的配置非 root 不可读,此时按目录名接受)
-		if fc, err := tunnel.LoadTOML(cfg); err == nil && fc.Profile != "" && fc.Profile != profile {
-			continue
-		}
-		names = append(names, n)
-	}
-	return names
+// installedAt 报告 mode 下 profile 的共享服务是否已安装(以 ConfigDir/tunnel.toml 为准)。
+func installedAt(env *svcEnv, mode svc.Mode, profile string) bool {
+	_, err := os.Stat(filepath.Join(env.paths(mode, svc.ServiceName(profile)).ConfigDir, serviceConfig))
+	return err == nil
 }
 
-// resolveTarget 由 --mode / --profile / --name 定位一个已安装的服务:
-// 未给 --mode 时依次查找 user、system(都有则要求指定);未给 --name 时
-// 该 profile 下只有一个服务才自动选中。
+// resolveTarget 由 --mode / --profile 定位已安装的共享服务(每个 profile 一个):
+// --profile 缺省为 default;未给 --mode 时依次查找 user、system(都有则要求指定)。
 func resolveTarget(env *svcEnv, args map[string]interface{}) (target, error) {
+	if err := applyOwner(env, "", ""); err != nil {
+		return target{}, err
+	}
 	profile := strArg(args, "--profile", defaultProfile)
 	if err := tunnel.ValidateName(profile); err != nil {
 		return target{}, fmt.Errorf("profile 不合法:%w", err)
 	}
-	name := strArg(args, "--name", "")
 	var modes []svc.Mode
 	if m := strArg(args, "--mode", ""); m != "" {
 		mode, err := parseMode(m)
 		if err != nil {
 			return target{}, err
 		}
-		modes = []svc.Mode{mode}
-	} else {
-		modes = []svc.Mode{svc.ModeUser}
-		if env.goos != "windows" {
-			modes = append(modes, svc.ModeSystem)
+		if !installedAt(env, mode, profile) {
+			return target{}, fmt.Errorf("未找到已安装的服务 %s(%s 模式)", svc.ServiceName(profile), mode)
 		}
+		return target{mode, profile}, nil
+	}
+	modes = []svc.Mode{svc.ModeUser}
+	if env.goos != "windows" {
+		modes = append(modes, svc.ModeSystem)
 	}
 	var found []target
-	seenMode := map[svc.Mode]bool{}
 	for _, mode := range modes {
-		for _, n := range installedNames(env, mode, profile) {
-			if name == "" || n == name {
-				found = append(found, target{mode, profile, n})
-				seenMode[mode] = true
-			}
+		if installedAt(env, mode, profile) {
+			found = append(found, target{mode, profile})
 		}
 	}
-	switch {
-	case len(found) == 0 && name != "":
-		return target{}, fmt.Errorf("未找到已安装的服务 %s", svc.ServiceName(profile, name))
-	case len(found) == 0:
+	switch len(found) {
+	case 0:
 		return target{}, fmt.Errorf("profile %s 下没有已安装的服务(先运行 tunnel install,或用 --profile 指定)", profile)
-	case len(seenMode) > 1:
-		return target{}, errors.New("user 与 system 模式下都有已安装的服务,请用 --mode 指定")
-	case len(found) > 1:
-		var ns []string
-		for _, t := range found {
-			ns = append(ns, t.name)
-		}
-		return target{}, fmt.Errorf("profile %s 下有多个服务(%s),请用 --name 指定", profile, strings.Join(ns, "、"))
+	case 1:
+		return found[0], nil
 	}
-	return found[0], nil
+	return target{}, fmt.Errorf("profile %s 在 user 与 system 模式下都已安装,请用 --mode 指定", profile)
 }
 
 // ---------- status / pause / resume / retry ----------
@@ -659,15 +697,12 @@ func removeServerDevice(env *svcEnv, fc *tunnel.FileConfig) error {
 // ---------- run-service ----------
 
 // runService 是服务进程的入口:读 ConfigDir/tunnel.toml → NewShare → 控制通道 →
-// Share.Run,直到 ctx 取消。set-name 改写配置中的 name,服务名不变。
-func runService(ctx context.Context, env *svcEnv, mode svc.Mode, profile, name string) error {
+// Share.Run,直到 ctx 取消。设备名字只来自配置;set-name 改写配置中的 name,服务名不变。
+func runService(ctx context.Context, env *svcEnv, mode svc.Mode, profile string) error {
 	if err := tunnel.ValidateName(profile); err != nil {
 		return fmt.Errorf("profile 不合法:%w", err)
 	}
-	if err := tunnel.ValidateName(name); err != nil {
-		return err
-	}
-	svcName := svc.ServiceName(profile, name)
+	svcName := svc.ServiceName(profile)
 	p := env.paths(mode, svcName)
 	cfgPath := filepath.Join(p.ConfigDir, serviceConfig)
 	fc, err := tunnel.LoadTOML(cfgPath)

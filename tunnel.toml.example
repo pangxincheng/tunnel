@@ -22,10 +22,12 @@ local_ssh_port = 5102
 # 账户不允许执行命令(nologin/ForceCommand)时必须写,并在 VPS 上预先创建该目录(chmod 700)。
 # remote_socket_dir = "/home/tunnel/.tunnel/sockets"
 
-# VPS loopback 上的汇合端口,server/client 必须一致。
+# VPS loopback 上的汇合端口,server/client 必须一致(与 name 二选一,取消注释其中一项)。
 # server 侧写 0 = 让 VPS 自动分配(实际端口见启动日志;重连会重新分配)。
-remote_listen_port = 5102
+# tunnel install 只支持 name;写了 remote_listen_port 的配置不能用于 install。
+# remote_listen_port = 5102
 
-# tunnel install 专用:服务器 profile,区分不同的 VPS(服务名 tunnel-<profile>-<name>)。
+# tunnel install 专用:服务器 profile,区分不同的 VPS(服务名 tunnel-<profile>,每个 profile 一个服务;
+# 设备名字 name 只保存在服务配置里,改名不改变服务名)。
 # 不写 = default;命令行 --profile 优先。tunnel server / client 忽略此项。
 # profile = "home"

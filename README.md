@@ -193,6 +193,8 @@ tunnel server -c tunnel.toml --log-level=debug  # 额外记录每次转发的连
 sudo tunnel install --mode system --name nas -c tunnel.toml
 # 登录后运行(当前用户的登录项),不要用 sudo
 tunnel install --mode user --name nas -c tunnel.toml
+# 以 root 运行但没有 SUDO_USER 时(如桌面 App 经 osascript / pkexec 提权),用 --for-user 指明服务属于谁
+tunnel install --mode system --for-user alice --name nas -c tunnel.toml
 ```
 
 | 平台 | `--mode system`(开机即运行) | `--mode user`(登录后运行) |
@@ -201,13 +203,16 @@ tunnel install --mode user --name nas -c tunnel.toml
 | Linux | systemd 系统服务 | `systemd --user` 服务 |
 | Windows | 不支持 | 任务计划程序登录任务(无控制台窗口,失败后重启) |
 
-- `install` 只支持按名字转发(必须有 `--name` 或配置文件 `name`),共享本机 `127.0.0.1:<local_ssh_port>`(默认 22)。参数与 `tunnel server` 相同,也读 `-c` / `./tunnel.toml`;`--user` 仍是 VPS 登录用户(sudo 下默认取发起 sudo 的用户)。
+- `install` 只支持按名字转发(必须有 `--name` 或配置文件 `name`),共享本机 `127.0.0.1:<local_ssh_port>`(默认 22)。参数与 `tunnel server` 相同,也读 `-c` / `./tunnel.toml`;`--user` 仍是 VPS 登录用户。
+- 安装用户(VPS 用户默认值、`~` 展开所用的家目录、system 模式控制通道的属主)按以下顺序确定:`--for-user=USERNAME`(只用于 `--mode system`)→ 以 root 运行时的 `SUDO_USER` / `SUDO_UID` → 当前用户。用户名、UID 与家目录总是取自同一个用户。
 - 安装前会实际连一次 VPS 并解析 socket 目录,失败直接报错(退出码 1),不留下服务。
-- 服务名为 `tunnel-<profile>-<name>`;`--profile`(或配置文件 `profile`)区分不同的 VPS,默认 `default`。
-- 安装时把自身复制到固定位置(system:`/usr/local/bin/tunnel`;user:`~/.local/bin/tunnel`、macOS `~/Library/Application Support/tunnel/bin/tunnel`、Windows `%USERPROFILE%\AppData\Local\tunnel\tunnel.exe`),并把合并后的配置写到服务的配置目录(`tunnel.toml`,权限 0600,主机公钥内联)。system 模式还会把私钥复制为配置目录下的 `id_key`(0600),服务不依赖你家目录里的文件。
-- 重复执行 `install` = 覆盖配置并重启服务(升级 tunnel 或修改参数时直接重新 install)。中途失败可修正后重新执行。
+- **每个服务器 profile 在本机只有一个共享服务**,服务名为 `tunnel-<profile>`;`--profile`(或配置文件 `profile`)区分不同的 VPS,默认 `default`。设备名字(`--name`)只保存在服务配置里:用桌面 App 或控制通道改名(set-name)不会改变服务名,之后的 status / pause / uninstall 仍按 profile 找到它。
+- 同一 profile 已以另一种模式安装时,`install` 报错「已以 <mode> 方式安装,请先 tunnel uninstall --mode <mode>」,不会出现两个服务抢同一个名字;要切换运行方式,先卸载再安装。
+- 安装时把自身复制到固定位置(system:`/usr/local/bin/tunnel`;user:`~/.local/bin/tunnel`、macOS `~/Library/Application Support/tunnel/bin/tunnel`、Windows 每个服务一份 `%LOCALAPPDATA%\tunnel\tunnel-<profile>\tunnel.exe`,复制前先结束该服务的任务),并把合并后的配置写到服务的配置目录(`tunnel.toml`,权限 0600,主机公钥内联)。system 模式还会把私钥复制为配置目录下的 `id_key`(0600),服务不依赖你家目录里的文件。
+- 同一模式重复执行 `install` = 更新同一个服务:覆盖配置并重启(升级 tunnel、修改参数或换设备名字时直接重新 install;换名字时顺带删除 VPS 上本机旧名字的设备信息)。中途失败可修正后重新执行。
+- Windows 的登录任务只绑定当前账户(登录触发器与运行身份都是 `DOMAIN\用户`,交互令牌、最低权限),普通用户无需管理员权限即可安装。
 
-查看与操作(经本机控制通道;只有安装该服务的用户与 root 可以操作):
+查看与操作(经本机控制通道;只有安装该服务的用户与 root 可以操作。控制通道:system 模式在 `/run/tunnel/`(macOS `/var/run/tunnel/`);user 模式在 `$XDG_RUNTIME_DIR/tunnel/`,macOS 或没有 `XDG_RUNTIME_DIR` 时在 `/tmp/tunnel-<uid>/`,该目录必须属于当前用户且权限为 0700,否则服务拒绝启动;路径超过 100 字节时 socket 文件名改用服务名的短哈希):
 
 ```bash
 tunnel status                 # 状态:连接中 / 已就绪 / 等待重连 / 失败 / 已暂停
@@ -217,17 +222,17 @@ tunnel resume                 # 恢复共享
 tunnel retry                  # 跳过退避等待立即重连(失败修正后用它重试)
 ```
 
-`--mode` / `--profile` / `--name` 缺省时自动查找:依次查找 user、system 中已安装的服务(两者都有时要求 `--mode`),该 profile 下只有一个服务时自动选中。服务已安装但控制通道连不上时,`status` 输出「已安装,未运行」,退出码 3。暂停**不**删除 VPS 上的设备信息,其他设备会看到它「离线 / 最后在线」。
+这些命令按 `--profile`(默认 `default`)定位服务,`--name` 不再用于选择;`--mode` 缺省时依次查找 user、system(两者都有时要求 `--mode`)。服务已安装但控制通道连不上时,`status` 输出「已安装,未运行」,退出码 3。暂停**不**删除 VPS 上的设备信息,其他设备会看到它「离线 / 最后在线」。
 
-日志:Linux 用 `journalctl -u tunnel-<profile>-<name> -f`(user 模式加 `--user`);macOS 在 `/var/log/tunnel/<服务名>.log`(system)或 `~/Library/Application Support/tunnel/<服务名>/tunnel.log`(user);Windows 在 `%USERPROFILE%\AppData\Roaming\tunnel\<服务名>\tunnel.log`。
+日志:Linux 用 `journalctl -u tunnel-<profile> -f`(user 模式加 `--user`);macOS 在 `/var/log/tunnel/<服务名>.log`(system)或 `~/Library/Application Support/tunnel/<服务名>/tunnel.log`(user);Windows 在 `%USERPROFILE%\AppData\Roaming\tunnel\<服务名>\tunnel.log`。
 
 卸载:
 
 ```bash
-sudo tunnel uninstall --mode system --name nas   # user 模式不加 sudo
+sudo tunnel uninstall --mode system --profile default   # user 模式不加 sudo;--profile 缺省为 default
 ```
 
-卸载会停止并删除服务,用服务配置连一次 VPS 删除本机的设备信息文件与残留 socket(只删属于本机的;VPS 连不上只打印警告,不阻止卸载),再删除配置目录与状态文件。复制到固定位置的 `tunnel` 二进制与日志保留。
+卸载会停止并删除服务,用服务配置连一次 VPS 删除本机的设备信息文件与残留 socket(只删属于本机的;VPS 连不上只打印警告,不阻止卸载),再删除配置目录与状态文件。复制到固定位置的 `tunnel` 二进制保留。日志:Linux 的 journal 与 macOS system 模式的 `/var/log/tunnel/<服务名>.log` 保留;macOS user 模式与 Windows 的日志位于配置目录内,随配置目录一起删除。
 
 断电 / 重启后自动恢复的提示:
 
@@ -239,9 +244,9 @@ sudo tunnel uninstall --mode system --name nas   # user 模式不加 sudo
 
 开发与自动化测试只使用假的服务管理器与临时目录,从不安装真实服务。发布前请在目标机器上逐项确认:
 
-1. **macOS**:`sudo tunnel install --mode system --name <名字> -c tunnel.toml` 后 `tunnel status` 为「已就绪」;重启后**无需登录**仍可经 VPS 连上;`tunnel pause` / `tunnel resume` 生效(暂停后其他设备看到离线);`sudo tunnel uninstall` 后 `launchctl print system/com.pangxincheng.tunnel-default-<名字>` 报不存在、`/etc/tunnel/tunnel-default-<名字>` 已删除。再用 `--mode user` 做一次(重新登录后自动运行)。
-2. **Linux**:同上,system 与 user 各一次(`systemctl status tunnel-default-<名字>`、`systemctl --user status ...`)。
-3. **Windows**:`tunnel install --mode user ...` 后服务立即运行、**没有控制台窗口**,`tunnel status` 为「已就绪」;注销再登录后自动运行;`tunnel uninstall` 后任务计划程序中的任务消失。
+1. **macOS**:`sudo tunnel install --mode system --name <名字> -c tunnel.toml` 后 `tunnel status` 为「已就绪」;重启后**无需登录**仍可经 VPS 连上;`tunnel pause` / `tunnel resume` 生效(暂停后其他设备看到离线);`sudo tunnel uninstall` 后 `launchctl print system/com.pangxincheng.tunnel-default` 报不存在、`/etc/tunnel/tunnel-default` 已删除。再用 `--mode user` 做一次(重新登录后自动运行)。
+2. **Linux**:同上,system 与 user 各一次(`systemctl status tunnel-default`、`systemctl --user status ...`)。
+3. **Windows**:以**普通用户**(非管理员)执行 `tunnel install --mode user ...` 能成功注册任务,服务立即运行、**没有控制台窗口**,`tunnel status` 为「已就绪」;注销再登录后自动运行;`tunnel uninstall` 后任务计划程序中的任务消失。
 
 ## 作为库使用(移动端)
 

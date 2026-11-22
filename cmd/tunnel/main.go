@@ -45,11 +45,11 @@ const usageText = `tunnel —— 通用 SSH 端口转发工具(反向/正向转�
 Usage:
   tunnel server [options] [--name=NAME]
   tunnel client [options] [--name=NAME]
-  tunnel install --mode=MODE [--profile=P] [--name=NAME] [options]
-  tunnel uninstall [--mode=MODE] [--profile=P] [--name=NAME]
-  tunnel status [--mode=MODE] [--profile=P] [--name=NAME] [--json]
-  tunnel (pause|resume|retry) [--mode=MODE] [--profile=P] [--name=NAME]
-  tunnel run-service --mode=MODE --profile=P --name=NAME
+  tunnel install --mode=MODE [--profile=P] [--name=NAME] [--for-user=USER] [options]
+  tunnel uninstall [--mode=MODE] [--profile=P]
+  tunnel status [--mode=MODE] [--profile=P] [--json]
+  tunnel (pause|resume|retry) [--mode=MODE] [--profile=P]
+  tunnel run-service --mode=MODE --profile=P
   tunnel version
 
 Options:
@@ -66,11 +66,13 @@ Options:
   --name=NAME              按名字转发:VPS 上 <socket目录>/NAME.sock(与 --remote-listen-port 二选一)
   --remote-socket-dir=DIR  VPS 上的 socket 目录(绝对路径;默认连接后执行 mkdir 解析 $HOME/.tunnel/sockets)
   --mode=MODE              服务模式:system(开机即运行,需 root,Windows 不支持)/ user(登录后运行)
-  --profile=P              服务器 profile(默认 default 或配置文件 profile;服务名 tunnel-<profile>-<name>)
+  --profile=P              服务器 profile(默认 default 或配置文件 profile;服务名 tunnel-<profile>,每个 profile 一个服务)
+  --for-user=USER          install --mode system:服务属于哪个用户(默认 SUDO_USER,否则当前用户)
   --json                   status 以 JSON 输出
 
 服务命令(install 等)只支持按名字转发,共享本机 127.0.0.1:<local-ssh-port>;
---mode / --profile / --name 缺省时自动查找已安装的服务。status 退出码 3 = 已安装但未运行。
+--name 是设备名字,只保存在服务配置中;同一 profile 再次 install 即更新(可改名字)。
+其余服务命令按 --profile(默认 default)定位服务,--mode 缺省时自动查找。status 退出码 3 = 已安装但未运行。
 `
 
 func main() {
@@ -129,8 +131,8 @@ func runServiceMain(args map[string]interface{}) {
 		os.Exit(2)
 	}
 	env := defaultEnv(nil)
-	profile, name := strArg(args, "--profile", ""), strArg(args, "--name", "")
-	out, closeOut, err := serviceLogOutput(env.paths(mode, svc.ServiceName(profile, name)).LogPath)
+	profile := strArg(args, "--profile", "")
+	out, closeOut, err := serviceLogOutput(env.paths(mode, svc.ServiceName(profile)).LogPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "tunnel: 打开日志文件失败: %v\n", err)
 		os.Exit(1)
@@ -138,7 +140,7 @@ func runServiceMain(args map[string]interface{}) {
 	defer closeOut()
 	env.logger, _ = newLoggerTo(out, "info")
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	err = runService(ctx, env, mode, profile, name)
+	err = runService(ctx, env, mode, profile)
 	stop()
 	if err != nil {
 		env.logger.Error("共享服务退出", "err", err)

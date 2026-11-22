@@ -13,8 +13,10 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	osuser "os/user"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -166,7 +168,19 @@ type fakeManager struct {
 	mu          sync.Mutex
 	installed   []svc.Spec
 	uninstalled []string
+	stopped     []string
 	installErr  error
+	onStop      func(name string)
+}
+
+func (m *fakeManager) Stop(name string) error {
+	if m.onStop != nil {
+		m.onStop(name)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stopped = append(m.stopped, name)
+	return nil
 }
 
 func (m *fakeManager) Install(s svc.Spec) error {
@@ -259,6 +273,7 @@ func newFixture(t *testing.T) *fixture {
 		home:       filepath.Join(root, "home"),
 		user:       "tester",
 		ownerUID:   -1,
+		account:    `PC\tester`,
 		euid:       501,
 		isTerminal: true,
 		exe:        exe,
@@ -277,6 +292,13 @@ func newFixture(t *testing.T) *fixture {
 		manager:  func(svc.Mode) (svc.Manager, error) { return mgr, nil },
 		dial:     tunnel.Dial,
 		deviceID: func() (string, error) { return testDeviceID, nil },
+		getenv:   func(string) string { return "" },
+		lookupUser: func(n string) (*osuser.User, error) {
+			return nil, errors.New("unknown user " + n)
+		},
+		lookupUserID: func(id string) (*osuser.User, error) {
+			return nil, errors.New("unknown uid " + id)
+		},
 	}
 	return f
 }
@@ -309,7 +331,7 @@ func TestCheckPrivilegeSystemReexec(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows 不做 sudo 重新执行")
 	}
-	args := []string{"install", "--mode", "system", "--name", "nas"}
+	args := []string{"install", "--mode", "system", "--name", "nas", "--for-user", "alice"}
 	re, err := checkPrivilege(svc.ModeSystem, 501, true, args)
 	if err != nil {
 		t.Fatal(err)
@@ -357,13 +379,14 @@ func TestUsageParsesServiceCommands(t *testing.T) {
 	for _, argv := range [][]string{
 		{"install", "--mode", "user", "--name", "nas"},
 		{"install", "--mode=system", "--profile", "home", "-c", "x.toml"},
+		{"install", "--mode=system", "--for-user=alice", "--name", "nas"},
 		{"uninstall"},
-		{"uninstall", "--mode", "user", "--profile", "p", "--name", "n"},
+		{"uninstall", "--mode", "user", "--profile", "p"},
 		{"status", "--json"},
-		{"pause", "--name", "nas"},
+		{"pause", "--profile", "home"},
 		{"resume"},
 		{"retry", "--mode", "system"},
-		{"run-service", "--mode", "user", "--profile", "default", "--name", "nas"},
+		{"run-service", "--mode", "user", "--profile", "default"},
 		{"server", "--user", "alice", "--name", "nas"},
 		{"server", "-c", "x.toml", "--log-level", "debug", "--remote-listen-port", "0"},
 		{"client", "--remote-ip", "h", "--remote-ssh-port", "22", "--remote-ssh-pub", "k", "--local-ssh-key", "p",
@@ -374,6 +397,13 @@ func TestUsageParsesServiceCommands(t *testing.T) {
 	}
 	if _, err := testParser.ParseArgs(usageText, []string{"install", "--name", "nas"}, "test"); err == nil {
 		t.Fatal("install 缺少 --mode 应为用法错误")
+	}
+	// 服务按 profile 定位,--name 不再用于选择服务;--for-user 只属于 install
+	for _, argv := range [][]string{{"status", "--name", "nas"}, {"uninstall", "--name", "nas"},
+		{"pause", "--name", "nas"}, {"server", "--for-user", "alice"}} {
+		if _, err := testParser.ParseArgs(usageText, argv, "test"); err == nil {
+			t.Fatalf("%v 应为用法错误", argv)
+		}
 	}
 }
 
@@ -423,7 +453,7 @@ func TestInstallSystemWritesFilesAndSpec(t *testing.T) {
 	if err != nil || re != nil {
 		t.Fatalf("got %q, %v", re, err)
 	}
-	p := f.env.paths(svc.ModeSystem, "tunnel-home-nas")
+	p := f.env.paths(svc.ModeSystem, "tunnel-home")
 
 	key, err := os.Stat(filepath.Join(p.ConfigDir, "id_key"))
 	if err != nil || key.Mode().Perm() != 0o600 {
@@ -461,12 +491,12 @@ func TestInstallSystemWritesFilesAndSpec(t *testing.T) {
 		t.Fatalf("Install 调用次数 = %d", len(f.mgr.installed))
 	}
 	s := f.mgr.installed[0]
-	want := []string{"run-service", "--mode", "system", "--profile", "home", "--name", "nas"}
-	if s.Name != "tunnel-home-nas" || s.Mode != svc.ModeSystem || s.Exec != p.BinPath || s.LogPath != p.LogPath ||
+	want := []string{"run-service", "--mode", "system", "--profile", "home"}
+	if s.Name != "tunnel-home" || s.Mode != svc.ModeSystem || s.Exec != p.BinPath || s.LogPath != p.LogPath ||
 		strings.Join(s.Args, " ") != strings.Join(want, " ") {
 		t.Fatalf("Spec 不对: %+v", s)
 	}
-	if !strings.Contains(f.out.String(), "tunnel-home-nas") {
+	if !strings.Contains(f.out.String(), "tunnel-home") {
 		t.Fatalf("输出应包含服务名: %s", f.out.String())
 	}
 
@@ -485,7 +515,7 @@ func TestInstallUserKeepsKeyPath(t *testing.T) {
 	if _, err := installFlow(f.env, parse(t, argv...), argv); err != nil {
 		t.Fatal(err)
 	}
-	p := f.env.paths(svc.ModeUser, "tunnel-default-nas")
+	p := f.env.paths(svc.ModeUser, "tunnel-default")
 	fc, err := tunnel.LoadTOML(filepath.Join(p.ConfigDir, "tunnel.toml"))
 	if err != nil {
 		t.Fatal(err)
@@ -536,11 +566,11 @@ func TestRunServiceEndToEnd(t *testing.T) {
 	if _, err := installFlow(f.env, parse(t, argv...), argv); err != nil {
 		t.Fatal(err)
 	}
-	p := f.env.paths(svc.ModeUser, "tunnel-default-nas")
+	p := f.env.paths(svc.ModeUser, "tunnel-default")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- runService(ctx, f.env, svc.ModeUser, "default", "nas") }()
+	go func() { done <- runService(ctx, f.env, svc.ModeUser, "default") }()
 
 	st := waitPhase(t, p.ControlAddr, tunnel.PhaseReady)
 	if st.Name != "nas" {
@@ -592,6 +622,13 @@ func TestRunServiceEndToEnd(t *testing.T) {
 	if fi, _ := os.Stat(filepath.Join(p.ConfigDir, "tunnel.toml")); fi.Mode().Perm() != 0o600 {
 		t.Fatal("改写后的配置应保持 0600")
 	}
+	// 改名后仍按 profile 找到同一个服务
+	waitPhase(t, p.ControlAddr, tunnel.PhaseReady)
+	f.out.Reset()
+	if code := statusCmd(f.env, parse(t, "status")); code != 0 || !strings.Contains(f.out.String(), "nas2") ||
+		!strings.Contains(f.out.String(), "tunnel-default") {
+		t.Fatalf("改名后 status: code=%d %s", code, f.out.String())
+	}
 
 	cancel()
 	select {
@@ -606,7 +643,7 @@ func TestRunServiceEndToEnd(t *testing.T) {
 
 func TestStatusNotRunning(t *testing.T) {
 	f := newFixture(t)
-	p := f.env.paths(svc.ModeUser, "tunnel-default-nas")
+	p := f.env.paths(svc.ModeUser, "tunnel-default")
 	if err := os.MkdirAll(p.ConfigDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -629,21 +666,19 @@ func TestStatusNotInstalled(t *testing.T) {
 func TestResolveTargetAmbiguous(t *testing.T) {
 	f := newFixture(t)
 	for _, mode := range []svc.Mode{svc.ModeUser, svc.ModeSystem} {
-		for _, n := range []string{"a", "b"} {
-			p := f.env.paths(mode, svc.ServiceName("default", n))
-			os.MkdirAll(p.ConfigDir, 0o700)
-			os.WriteFile(filepath.Join(p.ConfigDir, "tunnel.toml"), []byte("profile = \"default\"\n"), 0o600)
-		}
+		p := f.env.paths(mode, svc.ServiceName("default"))
+		os.MkdirAll(p.ConfigDir, 0o700)
+		os.WriteFile(filepath.Join(p.ConfigDir, "tunnel.toml"), []byte("profile = \"default\"\nname = \"nas\"\n"), 0o600)
 	}
-	if _, err := resolveTarget(f.env, parse(t, "status", "--name", "a")); err == nil || !strings.Contains(err.Error(), "--mode") {
+	if _, err := resolveTarget(f.env, parse(t, "status")); err == nil || !strings.Contains(err.Error(), "--mode") {
 		t.Fatalf("两种模式都有时应要求 --mode: %v", err)
 	}
-	if _, err := resolveTarget(f.env, parse(t, "status", "--mode", "user")); err == nil || !strings.Contains(err.Error(), "--name") {
-		t.Fatalf("多个服务时应要求 --name: %v", err)
-	}
-	tg, err := resolveTarget(f.env, parse(t, "status", "--mode", "user", "--name", "b"))
-	if err != nil || tg.mode != svc.ModeUser || tg.name != "b" || tg.profile != "default" {
+	tg, err := resolveTarget(f.env, parse(t, "status", "--mode", "user"))
+	if err != nil || tg.mode != svc.ModeUser || tg.profile != "default" || tg.service() != "tunnel-default" {
 		t.Fatalf("got %+v %v", tg, err)
+	}
+	if _, err := resolveTarget(f.env, parse(t, "status", "--profile", "other")); err == nil || !strings.Contains(err.Error(), "other") {
+		t.Fatalf("未安装的 profile 应报错: %v", err)
 	}
 }
 
@@ -655,7 +690,7 @@ func TestUninstallRemovesEverything(t *testing.T) {
 	if _, err := installFlow(f.env, parse(t, argv...), argv); err != nil {
 		t.Fatal(err)
 	}
-	p := f.env.paths(svc.ModeUser, "tunnel-default-nas")
+	p := f.env.paths(svc.ModeUser, "tunnel-default")
 	os.MkdirAll(filepath.Dir(p.StatePath), 0o700)
 	os.WriteFile(p.StatePath, []byte(`{"paused":true}`), 0o600)
 	// VPS 上本机留下的设备信息与 socket(sshd 不会删除 socket 文件)
@@ -668,7 +703,7 @@ func TestUninstallRemovesEverything(t *testing.T) {
 	if _, err := uninstallFlow(f.env, parse(t, uargv...), uargv); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.mgr.uninstalled) != 1 || f.mgr.uninstalled[0] != "tunnel-default-nas" {
+	if len(f.mgr.uninstalled) != 1 || f.mgr.uninstalled[0] != "tunnel-default" {
 		t.Fatalf("Uninstall 调用: %v", f.mgr.uninstalled)
 	}
 	for _, gone := range []string{p.ConfigDir, p.StatePath, filepath.Join(f.sockDir, "nas.json"), filepath.Join(f.sockDir, "nas.sock")} {
@@ -690,14 +725,14 @@ func TestUninstallVPSUnreachableOnlyWarns(t *testing.T) {
 	f.env.dial = func(*tunnel.Config) (*ssh.Client, error) { return nil, errors.New("连接超时") }
 	var logBuf bytes.Buffer
 	f.env.logger = slog.New(slog.NewTextHandler(&logBuf, nil))
-	uargv := []string{"uninstall", "--mode", "user", "--name", "nas"}
+	uargv := []string{"uninstall", "--mode", "user"}
 	if _, err := uninstallFlow(f.env, parse(t, uargv...), uargv); err != nil {
 		t.Fatalf("VPS 连不上不应阻止卸载: %v", err)
 	}
 	if !strings.Contains(logBuf.String(), "WARN") {
 		t.Fatalf("应打印警告: %s", logBuf.String())
 	}
-	p := f.env.paths(svc.ModeUser, "tunnel-default-nas")
+	p := f.env.paths(svc.ModeUser, "tunnel-default")
 	if _, err := os.Stat(p.ConfigDir); !os.IsNotExist(err) {
 		t.Fatal("配置目录应被删除")
 	}
@@ -708,7 +743,7 @@ func TestUninstallSystemChecksPrivilege(t *testing.T) {
 		t.Skip()
 	}
 	f := newFixture(t)
-	p := f.env.paths(svc.ModeSystem, "tunnel-default-nas")
+	p := f.env.paths(svc.ModeSystem, "tunnel-default")
 	os.MkdirAll(p.ConfigDir, 0o700)
 	os.WriteFile(filepath.Join(p.ConfigDir, "tunnel.toml"), []byte("name = \"nas\"\n"), 0o600)
 	f.env.isTerminal = false
@@ -732,7 +767,7 @@ func TestUninstallWithoutRegistration(t *testing.T) {
 	if _, err := installFlow(f.env, parse(t, argv...), argv); err == nil {
 		t.Fatal("Install 失败应报错")
 	}
-	p := f.env.paths(svc.ModeUser, "tunnel-default-nas")
+	p := f.env.paths(svc.ModeUser, "tunnel-default")
 	if _, err := os.Stat(filepath.Join(p.ConfigDir, "tunnel.toml")); err != nil {
 		t.Fatalf("前提:半途失败后配置仍在: %v", err)
 	}
@@ -755,5 +790,194 @@ func TestUninstallWithoutRegistration(t *testing.T) {
 		if _, err := os.Stat(gone); !os.IsNotExist(err) {
 			t.Fatalf("%s 应被删除", gone)
 		}
+	}
+}
+
+// ---------- 每个 profile 一个服务(I3) ----------
+
+func TestInstallOtherModeRefused(t *testing.T) {
+	f := newFixture(t)
+	argv := f.installArgv("user", "--name", "nas")
+	if _, err := installFlow(f.env, parse(t, argv...), argv); err != nil {
+		t.Fatal(err)
+	}
+	f.env.euid = 0
+	argv = f.installArgv("system", "--name", "nas")
+	_, err := installFlow(f.env, parse(t, argv...), argv)
+	if err == nil || !strings.Contains(err.Error(), "已以 user 方式安装,请先 tunnel uninstall --mode user") {
+		t.Fatalf("另一种模式已安装时应报错: %v", err)
+	}
+	if len(f.mgr.installed) != 1 {
+		t.Fatal("不应安装第二个服务")
+	}
+	if _, err := os.Stat(f.env.paths(svc.ModeSystem, "tunnel-default").ConfigDir); !os.IsNotExist(err) {
+		t.Fatal("拒绝时不应写 system 配置")
+	}
+
+	// 反过来:system 已安装时装 user 同样拒绝
+	g := newFixture(t)
+	g.env.euid = 0
+	argv = g.installArgv("system", "--name", "nas")
+	if _, err := installFlow(g.env, parse(t, argv...), argv); err != nil {
+		t.Fatal(err)
+	}
+	g.env.euid = 501
+	argv = g.installArgv("user", "--name", "nas")
+	if _, err := installFlow(g.env, parse(t, argv...), argv); err == nil || !strings.Contains(err.Error(), "已以 system 方式安装,请先 tunnel uninstall --mode system") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+// 同一模式重复安装 = 更新同一个服务;换名字时删除 VPS 上本机旧名字的设备信息。
+func TestInstallSameModeUpdatesAndRenames(t *testing.T) {
+	f := newFixture(t)
+	argv := f.installArgv("user", "--name", "nas")
+	if _, err := installFlow(f.env, parse(t, argv...), argv); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(f.sockDir, "nas.json"), []byte(`{"device_id":"`+testDeviceID+`","name":"nas"}`), 0o600)
+	argv = f.installArgv("user", "--name", "nas2")
+	if _, err := installFlow(f.env, parse(t, argv...), argv); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.mgr.installed) != 2 || f.mgr.installed[0].Name != "tunnel-default" || f.mgr.installed[1].Name != "tunnel-default" {
+		t.Fatalf("应更新同一个服务: %+v", f.mgr.installed)
+	}
+	fc, err := tunnel.LoadTOML(filepath.Join(f.env.paths(svc.ModeUser, "tunnel-default").ConfigDir, "tunnel.toml"))
+	if err != nil || fc.Name != "nas2" {
+		t.Fatalf("配置名字应为 nas2: %+v %v", fc, err)
+	}
+	if _, err := os.Stat(filepath.Join(f.sockDir, "nas.json")); !os.IsNotExist(err) {
+		t.Fatal("旧名字的本机设备信息应被删除")
+	}
+}
+
+// ---------- 安装用户解析(I4) ----------
+
+func TestInstallOwnerResolution(t *testing.T) {
+	users := map[string]*osuser.User{
+		"alice": {Username: "alice", Uid: "1001", HomeDir: "/home/alice"},
+		"bob":   {Username: "bob", Uid: "1002", HomeDir: "/home/bob"},
+	}
+	cases := []struct {
+		name     string
+		env      map[string]string
+		forUser  string
+		wantUser string
+		wantUID  string
+		wantHome string
+		wantErr  string
+	}{
+		{name: "--for-user 优先于 SUDO_USER", env: map[string]string{"SUDO_USER": "bob", "SUDO_UID": "1002"}, forUser: "alice", wantUser: "alice", wantUID: "1001", wantHome: "/home/alice"},
+		{name: "SUDO_USER", env: map[string]string{"SUDO_USER": "bob", "SUDO_UID": "1002"}, wantUser: "bob", wantUID: "1002", wantHome: "/home/bob"},
+		{name: "只有 SUDO_UID", env: map[string]string{"SUDO_UID": "1001"}, wantUser: "alice", wantUID: "1001", wantHome: "/home/alice"},
+		{name: "无提示时为当前用户(提权方式不设置 SUDO_*)", wantUser: "root", wantUID: "0", wantHome: "ROOTHOME"},
+		{name: "--for-user 不存在", forUser: "nobody-here", wantErr: "nobody-here"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			f.env.euid = 0
+			f.env.user, f.env.ownerUID = "root", 0
+			rootHome := f.env.home
+			f.env.getenv = func(k string) string { return tc.env[k] }
+			f.env.lookupUser = func(n string) (*osuser.User, error) {
+				if u, ok := users[n]; ok {
+					return u, nil
+				}
+				return nil, errors.New("unknown user " + n)
+			}
+			f.env.lookupUserID = func(id string) (*osuser.User, error) {
+				for _, u := range users {
+					if u.Uid == id {
+						return u, nil
+					}
+				}
+				return nil, errors.New("unknown uid " + id)
+			}
+			// 不给 --user / --local-ssh-key:默认值取自解析出的安装用户
+			cfg := filepath.Join(f.root, "c.toml")
+			os.WriteFile(cfg, []byte("local_ssh_key = \"~/id_test\"\n"), 0o600)
+			host, port := f.server.addr()
+			argv := []string{"install", "--mode", "system", "-c", cfg, "--name", "nas",
+				"--remote-ip", host, "--remote-ssh-port", fmt.Sprint(port), "--remote-ssh-pub", f.server.hostPub,
+				"--remote-socket-dir", f.sockDir}
+			if tc.forUser != "" {
+				argv = append(argv, "--for-user", tc.forUser)
+			}
+			var gotKey, gotUser string
+			f.env.dial = func(c *tunnel.Config) (*ssh.Client, error) {
+				gotKey, gotUser = c.KeyPath, c.User
+				return nil, errors.New("stop here")
+			}
+			_, err := installFlow(f.env, parse(t, argv...), argv)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("got %v", err)
+				}
+				return
+			}
+			home := tc.wantHome
+			if home == "ROOTHOME" {
+				home = rootHome
+			}
+			if gotUser != tc.wantUser || gotKey != filepath.Join(home, "id_test") {
+				t.Fatalf("VPS 用户 / 私钥 = %q %q,期望 %q %q", gotUser, gotKey, tc.wantUser, filepath.Join(home, "id_test"))
+			}
+			if want := tc.wantUID; strconv.Itoa(f.env.ownerUID) != want {
+				t.Fatalf("控制通道属主 = %d,期望 %s", f.env.ownerUID, want)
+			}
+		})
+	}
+}
+
+func TestInstallForUserOnlySystem(t *testing.T) {
+	f := newFixture(t)
+	argv := f.installArgv("user", "--name", "nas", "--for-user", "alice")
+	if _, err := installFlow(f.env, parse(t, argv...), argv); err == nil || !strings.Contains(err.Error(), "--for-user") {
+		t.Fatalf("user 模式给 --for-user 应报错: %v", err)
+	}
+}
+
+// 安装用户写入 owner 文件(system 模式控制通道属主)。
+func TestInstallForUserWritesOwner(t *testing.T) {
+	f := newFixture(t)
+	f.env.euid = 0
+	f.env.lookupUser = func(n string) (*osuser.User, error) {
+		return &osuser.User{Username: n, Uid: "1001", HomeDir: filepath.Join(f.root, "alice")}, nil
+	}
+	argv := f.installArgv("system", "--name", "nas", "--for-user", "alice")
+	if _, err := installFlow(f.env, parse(t, argv...), argv); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(f.env.paths(svc.ModeSystem, "tunnel-default").ConfigDir, "owner"))
+	if err != nil || strings.TrimSpace(string(b)) != "1001" {
+		t.Fatalf("owner = %q %v", b, err)
+	}
+}
+
+// ---------- Windows:任务账户与按服务的二进制(I5 / I6) ----------
+
+func TestInstallWindowsStopsTaskBeforeCopy(t *testing.T) {
+	f := newFixture(t)
+	f.env.goos = "windows"
+	p := f.env.paths(svc.ModeUser, "tunnel-default")
+	f.mgr.onStop = func(name string) {
+		if _, err := os.Stat(p.BinPath); !os.IsNotExist(err) {
+			t.Errorf("Stop 应在复制二进制之前调用")
+		}
+	}
+	argv := f.installArgv("user", "--name", "nas")
+	if _, err := installFlow(f.env, parse(t, argv...), argv); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.mgr.stopped) != 1 || f.mgr.stopped[0] != "tunnel-default" {
+		t.Fatalf("应先停止任务: %v", f.mgr.stopped)
+	}
+	if _, err := os.Stat(p.BinPath); err != nil {
+		t.Fatal(err)
+	}
+	if s := f.mgr.installed[0]; s.User != `PC\tester` {
+		t.Fatalf("Spec.User = %q,应为当前账户", s.User)
 	}
 }
