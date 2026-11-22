@@ -40,15 +40,12 @@ func ValidateName(name string) error {
 
 // ResolveSocketPath 返回 VPS 上 name 对应的 socket 完整路径。
 // dir 非空时直接使用(不执行任何远程命令);为空时经 exec 执行
-// DefaultSocketDirCommand 解析 $HOME/.tunnel/sockets。
+// DefaultSocketDirCommand 解析 $HOME/.tunnel/sockets;exec 被拒时改用 SFTP 兜底。
 // 远端始终是 POSIX,故用 path 而非 filepath 拼接。
 func ResolveSocketPath(sc *ssh.Client, dir, name string) (string, error) {
-	if dir == "" {
-		d, err := remoteSocketDir(sc)
-		if err != nil {
-			return "", err
-		}
-		dir = d
+	dir, err := ResolveSocketDir(sc, dir)
+	if err != nil {
+		return "", err
 	}
 	p := path.Join(dir, name+".sock")
 	if len(p) > maxSocketPathLen {

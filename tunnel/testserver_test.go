@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -35,6 +36,7 @@ type testSSHServer struct {
 	// 只认 DefaultSocketDirCommand。
 	Home       string
 	DenyExec   bool
+	DenySFTP   bool // 拒绝 sftp 子系统
 	ExecOutput func(cmd string) (stdout string, exit uint32)
 	execMu     sync.Mutex
 	execs      int
@@ -328,7 +330,7 @@ func (s *testSSHServer) defaultExec(cmd string) (string, uint32) {
 	return dir + "\n", 0
 }
 
-// handleSession 支持 session 通道上的 exec 请求(其余请求一律拒绝)。
+// handleSession 支持 session 通道上的 exec 与 sftp 子系统请求(其余请求一律拒绝)。
 func (s *testSSHServer) handleSession(nc ssh.NewChannel) {
 	ch, reqs, err := nc.Accept()
 	if err != nil {
@@ -336,6 +338,21 @@ func (s *testSSHServer) handleSession(nc ssh.NewChannel) {
 	}
 	defer ch.Close()
 	for req := range reqs {
+		if req.Type == "subsystem" {
+			var p struct{ Name string }
+			if ssh.Unmarshal(req.Payload, &p) != nil || p.Name != "sftp" || s.DenySFTP {
+				req.Reply(false, nil)
+				continue
+			}
+			req.Reply(true, nil)
+			srv, err := sftp.NewServer(ch, sftp.WithServerWorkingDirectory(s.Home))
+			if err != nil {
+				return
+			}
+			srv.Serve() // 客户端关闭通道后返回
+			srv.Close()
+			return
+		}
 		if req.Type != "exec" {
 			req.Reply(false, nil)
 			continue

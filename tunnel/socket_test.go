@@ -76,6 +76,7 @@ func TestResolveSocketPathDefaultViaExec(t *testing.T) {
 func TestResolveSocketPathExecDenied(t *testing.T) {
 	server, client := dialTestServer(t)
 	server.DenyExec = true
+	server.DenySFTP = true // SFTP 兜底也被拒,才应报错
 	_, err := ResolveSocketPath(client, "", "nas")
 	if err == nil {
 		t.Fatal("exec 被拒应报错")
@@ -91,6 +92,7 @@ func TestResolveSocketPathExecDenied(t *testing.T) {
 
 func TestResolveSocketPathRejectsRelativeOutput(t *testing.T) {
 	server, client := dialTestServer(t)
+	server.DenySFTP = true
 	server.ExecOutput = func(string) (string, uint32) { return "relative/dir\n", 0 }
 	if _, err := ResolveSocketPath(client, "", "nas"); err == nil {
 		t.Fatal("非绝对路径输出应报错")
@@ -114,6 +116,7 @@ func TestResolveSocketPathExecTimeout(t *testing.T) {
 	server, client := dialTestServer(t)
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })
+	server.DenySFTP = true
 	server.ExecOutput = func(string) (string, uint32) { <-release; return "", 0 }
 	old := execTimeout
 	execTimeout = 200 * time.Millisecond

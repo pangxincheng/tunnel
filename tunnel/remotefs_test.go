@@ -1,0 +1,122 @@
+package tunnel
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+func TestDeviceInfoRoundTrip(t *testing.T) {
+	server, client := dialTestServer(t)
+	dir, err := ResolveSocketDir(client, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := DeviceInfo{
+		DeviceID: "abc", Name: "nas", Hostname: "h", OS: "linux", OSVersion: "6.1",
+		Arch: "amd64", TunnelVersion: "1.2.3", StartedAt: time.Now().Truncate(time.Second),
+	}
+	if err := WriteDeviceInfo(client, dir, want); err != nil {
+		t.Fatalf("WriteDeviceInfo: %v", err)
+	}
+	// 覆盖写一次,确认重命名可替换已有文件
+	if err := WriteDeviceInfo(client, dir, want); err != nil {
+		t.Fatalf("WriteDeviceInfo(覆盖): %v", err)
+	}
+	got, err := ReadDeviceInfos(client, dir)
+	if err != nil {
+		t.Fatalf("ReadDeviceInfos: %v", err)
+	}
+	g, ok := got["nas"]
+	if !ok || len(got) != 1 {
+		t.Fatalf("map = %+v", got)
+	}
+	if g.DeviceID != want.DeviceID || g.Name != want.Name || g.Hostname != want.Hostname ||
+		g.OS != want.OS || g.OSVersion != want.OSVersion || g.Arch != want.Arch ||
+		g.TunnelVersion != want.TunnelVersion || !g.StartedAt.Equal(want.StartedAt) {
+		t.Fatalf("got %+v want %+v", g, want)
+	}
+	if tmps, _ := filepath.Glob(filepath.Join(server.Home, ".tunnel", "sockets", "*.tmp")); len(tmps) != 0 {
+		t.Fatalf("残留临时文件: %v", tmps)
+	}
+}
+
+func TestReadDeviceInfosCorruptFile(t *testing.T) {
+	server, client := dialTestServer(t)
+	dir, err := ResolveSocketDir(client, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "bad.json"), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = server
+	got, err := ReadDeviceInfos(client, dir)
+	if err != nil {
+		t.Fatalf("ReadDeviceInfos: %v", err)
+	}
+	b, ok := got["bad"]
+	if !ok || b.DeviceID != "" || b.Name != "bad" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestRemoveDeviceInfoOnlyOwn(t *testing.T) {
+	_, client := dialTestServer(t)
+	dir, err := ResolveSocketDir(client, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteDeviceInfo(client, dir, DeviceInfo{DeviceID: "mine", Name: "nas"}); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "nas.json")
+	if err := RemoveDeviceInfo(client, dir, "nas", "other"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(file); err != nil {
+		t.Fatalf("他人的文件不应被删: %v", err)
+	}
+	if err := RemoveDeviceInfo(client, dir, "nas", "mine"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Fatalf("自己的文件应被删: %v", err)
+	}
+	if err := RemoveDeviceInfo(client, dir, "nas", "mine"); err != nil {
+		t.Fatalf("不存在应返回 nil: %v", err)
+	}
+}
+
+func TestResolveSocketDirFallsBackToSFTP(t *testing.T) {
+	server, client := dialTestServer(t)
+	server.DenyExec = true
+	got, err := ResolveSocketDir(client, "")
+	if err != nil {
+		t.Fatalf("ResolveSocketDir: %v", err)
+	}
+	want := server.Home + "/.tunnel/sockets"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+	st, err := os.Stat(want)
+	if err != nil || st.Mode().Perm() != 0o700 {
+		t.Fatalf("stat = %v, %v", st, err)
+	}
+	if d, err := ResolveSocketDir(client, "/x/y"); err != nil || d != "/x/y" {
+		t.Fatalf("显式目录: %q %v", d, err)
+	}
+}
+
+func TestResolveSocketDirBothDenied(t *testing.T) {
+	server, client := dialTestServer(t)
+	server.DenyExec = true
+	server.DenySFTP = true
+	_, err := ResolveSocketDir(client, "")
+	var sde *SocketDirError
+	if !errors.As(err, &sde) || !IsPermanent(err) {
+		t.Fatalf("err = %v", err)
+	}
+}
