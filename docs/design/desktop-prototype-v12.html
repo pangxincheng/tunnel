@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Tunnel 可交互原型 v12</title>
+<style>
+  :root {
+    --ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    --code: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  }
+  /* ---------- theme tokens ---------- */
+  .app { --canvas:#F3F4F6; --side:#ECEEF1; --surface:#FFFFFF; --ink:#16191D; --muted:#6A717B; --faint:#9AA1AA; --line:#E1E4E8;
+         --fault:#B3422E; --fault-soft:#F8E9E5; --fault-ink:#7A2B1D; --hover:rgba(22,25,29,.05); --sel:rgba(22,25,29,.07); --scrim:rgba(22,25,29,.28); --shadow:rgba(22,25,29,.12); }
+  .app.dark { --canvas:#1A1C20; --side:#15171A; --surface:#23262B; --ink:#E8EAED; --muted:#A0A7B0; --faint:#6E757E; --line:#2F3338;
+              --fault:#E06A52; --fault-soft:#3A221D; --fault-ink:#F3B3A6; --hover:rgba(255,255,255,.04); --sel:rgba(255,255,255,.08); --scrim:rgba(0,0,0,.5); --shadow:rgba(0,0,0,.5); }
+  .app[data-accent="green"]    { --live:#13795B; } .app.dark[data-accent="green"]    { --live:#3DBE8B; }
+  .app[data-accent="blue"]     { --live:#2457D6; } .app.dark[data-accent="blue"]     { --live:#6E9BFF; }
+  .app[data-accent="violet"]   { --live:#6544E0; } .app.dark[data-accent="violet"]   { --live:#A592FF; }
+  .app[data-accent="amber"]    { --live:#A85A06; } .app.dark[data-accent="amber"]    { --live:#F0A24B; }
+  .app[data-accent="graphite"] { --live:#3E4651; } .app.dark[data-accent="graphite"] { --live:#C9CFD7; }
+  .app { --live-soft:color-mix(in srgb, var(--live) 14%, transparent); }
+
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:var(--ui); background:#C9CED4; color:#16191D; min-height:100vh; padding:24px; -webkit-font-smoothing:antialiased; }
+  body.fs { padding:0; }
+  button, input, select { font:inherit; color:inherit; }
+  :focus-visible { outline:2px solid var(--live); outline-offset:2px; }
+
+  .demo { max-width:1100px; margin:0 auto 14px; display:flex; gap:18px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; color:#2b3138; }
+  .demo h1 { font-size:16px; font-weight:600; }
+  .demo p { font-size:12.5px; color:#46505a; margin-top:4px; max-width:620px; line-height:1.55; }
+  .demo .ctl { display:flex; gap:6px; flex-wrap:wrap; }
+  .demo .ctl button { border:0; background:rgba(255,255,255,.6); padding:6px 10px; border-radius:7px; font-size:12px; cursor:pointer; }
+  .demo .ctl button.sel { background:#fff; font-weight:600; box-shadow:0 1px 2px rgba(0,0,0,.12); }
+  body.fs .demo { display:none; }
+
+  /* ---------- window ---------- */
+  .app { width:940px; height:600px; min-width:720px; min-height:460px; max-width:100%; margin:0 auto; resize:both; overflow:hidden;
+         background:var(--canvas); color:var(--ink); border-radius:11px; box-shadow:0 22px 50px rgba(22,25,29,.25), 0 0 0 .5px rgba(22,25,29,.35);
+         display:grid; grid-template-columns:240px 1fr; position:relative; }
+  body.fs .app { width:100vw !important; height:100vh !important; max-width:none; border-radius:0; resize:none; }
+  .sidebar { background:var(--side); border-right:1px solid var(--line); display:flex; flex-direction:column; min-height:0; }
+  .side-top { height:46px; display:flex; align-items:center; padding:0 12px; gap:8px; flex:none; }
+  .lights { display:flex; gap:7px; } .lights i { width:12px; height:12px; border-radius:50%; display:block; background:#D5D8DC; }
+  .lights i.full { cursor:pointer; } .app.dark .lights i { background:#3a3e44; }
+  .side-title { font-size:11.5px; color:var(--muted); padding:6px 16px 4px; }
+  .servers { flex:1; overflow:auto; padding:0 8px; }
+  .srv { width:100%; display:flex; align-items:center; gap:6px; padding:8px 8px 8px 10px; border-radius:7px; }
+  .srv:hover { background:var(--hover); } .srv.sel { background:var(--sel); }
+  .srv .n { font-size:13px; font-weight:500; } .srv .m { font-size:11.5px; color:var(--muted); margin-top:1px; }
+  .srv { position:relative; }
+  .srv-main { flex:1; min-width:0; display:flex; align-items:center; gap:10px; border:0; background:none; text-align:left; cursor:pointer; padding:0; }
+  .srv-acts { display:none; gap:2px; flex:none; }
+  .srv:hover .srv-acts, .srv:focus-within .srv-acts, .srv.sel .srv-acts { display:flex; }
+  .sa { width:24px; height:24px; border:0; border-radius:5px; background:none; color:var(--muted); cursor:pointer; display:grid; place-items:center; }
+  .sa:hover { background:var(--surface); color:var(--ink); box-shadow:0 0 0 .5px var(--shadow); }
+  .sa.danger:hover { color:var(--fault); }
+  .sa.on { color:var(--live); }
+  .banner.paused { background:var(--sel); color:var(--ink); }
+  .btn.dangerfill { background:var(--fault); color:#fff; }
+  .side-bottom { display:flex; align-items:center; gap:6px; padding:10px 10px 12px; border-top:1px solid var(--line); flex:none; }
+  .addbtn { flex:1; height:30px; border:0; border-radius:7px; background:var(--surface); box-shadow:0 0 0 .5px var(--shadow); cursor:pointer; font-size:12.5px; display:flex; align-items:center; justify-content:center; gap:6px; }
+  .addbtn:hover { background:var(--canvas); }
+  .icon { width:30px; height:30px; border:0; border-radius:7px; background:transparent; cursor:pointer; display:grid; place-items:center; color:var(--muted); flex:none; }
+  .icon:hover { background:var(--hover); color:var(--ink); }
+
+  .main { display:flex; flex-direction:column; min-width:0; min-height:0; }
+  .main-top { height:46px; display:flex; align-items:center; padding:0 20px; gap:12px; border-bottom:1px solid var(--line); flex:none; }
+  .main-top .t { font-size:14px; font-weight:600; } .main-top .h { font-size:12px; color:var(--muted); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ghost { height:28px; padding:0 10px; border:1px solid var(--line); border-radius:6px; background:var(--surface); cursor:pointer; font-size:12px; white-space:nowrap; }
+  .ghost:hover { background:var(--canvas); }
+  .content { flex:1; overflow:auto; padding:6px 20px 24px; }
+  .col { max-width:680px; }
+
+  .sec { margin-top:16px; }
+  .sec-head { padding:0 4px 6px; display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
+  .sec-head .t { font-size:12px; font-weight:600; } .sec-head .s { font-size:11.5px; color:var(--faint); white-space:nowrap; }
+  .list { background:var(--surface); border-radius:9px; box-shadow:0 0 0 .5px var(--shadow); overflow:hidden; }
+  .item + .item { border-top:1px solid var(--line); }
+  .drow { display:flex; align-items:center; gap:10px; padding:0 12px; height:54px; }
+  .dot { width:8px; height:8px; border-radius:50%; flex:none; }
+  .dot.on { background:var(--live); } .dot.off { box-shadow:inset 0 0 0 1.5px var(--faint); } .dot.err { background:var(--fault); } .dot.idle { background:var(--faint); opacity:.6; }
+  .grow { flex:1; min-width:0; }
+  .name { font-size:13.5px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .name .tag { font-size:11px; color:var(--muted); font-weight:400; margin-left:8px; }
+  .meta { font-size:11.5px; color:var(--muted); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .gap { display:inline-block; width:10px; }
+  #dlg { display:contents; }
+  .app { grid-template-rows:100%; }
+  .meta.err { color:var(--fault); } .meta.live { color:var(--live); }
+  .item.offline .name, .list.stale .name { color:var(--muted); }
+  .list.stale { opacity:.7; }
+
+  .conn { display:flex; align-items:center; gap:8px; }
+  .chip { font-family:var(--code); font-size:15px; font-weight:500; border:1px solid transparent; background:none; color:var(--faint); border-radius:6px; padding:2px 6px; cursor:text; }
+  .chip.on { color:var(--live); } .chip:hover { border-color:var(--line); background:var(--canvas); }
+  .inp { height:28px; padding:0 8px; border:1px solid var(--line); border-radius:6px; background:var(--canvas); color:var(--ink); outline:none; font-size:12.5px; transition:border-color .15s, box-shadow .15s, background .15s; }
+  .inp:hover { border-color:var(--faint); }
+  .inp:focus { border-color:var(--live); background:var(--surface); box-shadow:0 0 0 3px var(--live-soft); }
+  .inp.bad { border-color:var(--fault); box-shadow:0 0 0 3px var(--fault-soft); }
+  .inp.num { font-family:var(--code); font-size:15px; width:72px; }
+  .vsep { width:1px; height:22px; background:var(--line); flex:none; margin:0 2px; }
+  .copy { width:28px; height:28px; border:0; border-radius:6px; background:none; color:var(--muted); cursor:pointer; display:grid; place-items:center; flex:none; }
+  .copy:hover { background:var(--canvas); color:var(--ink); }
+  .sw { width:34px; height:20px; border-radius:10px; background:var(--line); position:relative; flex:none; border:0; cursor:pointer; transition:background .18s; }
+  .app:not(.dark) .sw { background:#D3D7DC; }
+  .sw::after { content:""; position:absolute; width:16px; height:16px; border-radius:50%; background:#fff; top:2px; left:2px; box-shadow:0 1px 2px rgba(0,0,0,.25); transition:left .18s; }
+  .sw[aria-checked="true"], .app:not(.dark) .sw[aria-checked="true"] { background:var(--live); } .sw[aria-checked="true"]::after { left:16px; }
+  .sw:disabled { opacity:.35; cursor:not-allowed; }
+  .perr { padding:0 12px 10px 30px; font-size:11.5px; color:var(--fault); margin-top:-6px; }
+
+  .sub { border-top:1px solid var(--line); padding:0 12px; }
+  .frow { display:flex; align-items:center; gap:12px; height:48px; }
+  .frow + .frow { border-top:1px solid var(--line); }
+  .frow .lbl { font-size:12.5px; flex:1; min-width:0; }
+  .frow .lbl small { display:block; font-size:11.5px; color:var(--muted); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ferr { font-size:11.5px; color:var(--fault); padding:0 0 10px; margin-top:-6px; }
+  .check { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted); height:38px; border-top:1px solid var(--line); }
+  .tick { width:14px; height:14px; border-radius:50%; background:var(--live-soft); color:var(--live); display:grid; place-items:center; font-size:10px; font-weight:700; }
+  .banner { margin-top:14px; display:flex; align-items:center; gap:12px; background:var(--fault-soft); color:var(--fault-ink); border-radius:9px; padding:10px 12px; font-size:12.5px; }
+  .banner .grow div + div { font-size:11.5px; opacity:.85; margin-top:2px; }
+  .errbox { margin:0 12px 12px; background:var(--fault-soft); color:var(--fault-ink); font-size:12px; line-height:1.5; padding:8px 10px; border-radius:7px; }
+  .lb { font-size:12px; color:var(--live); background:none; border:0; cursor:pointer; padding:2px 4px; border-radius:4px; white-space:nowrap; }
+  .lb.quiet { color:var(--muted); }
+  .mono { font-family:var(--code); font-size:11.5px; }
+  .empty { display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; height:100%; padding:0 40px; }
+  .empty h2 { font-size:15px; font-weight:600; } .empty p { font-size:12.5px; color:var(--muted); margin-top:8px; line-height:1.6; max-width:320px; }
+  .btn { font-size:13px; font-weight:500; border:0; border-radius:7px; padding:7px 16px; cursor:pointer; }
+  .btn.primary { background:var(--ink); color:var(--canvas); } .btn.primary:disabled { opacity:.35; cursor:not-allowed; }
+  .btn.plain { background:var(--surface); box-shadow:0 0 0 .5px var(--shadow), 0 0 0 1px var(--line) inset; }
+  .btn.danger { background:none; color:var(--fault); padding-left:0; }
+
+  /* dialogs */
+  .scrim { position:absolute; inset:0; background:var(--scrim); display:flex; align-items:center; justify-content:center; padding:24px; z-index:20; animation:fade .15s ease-out; }
+  .dlg { width:min(460px, 100%); max-height:100%; background:var(--canvas); border-radius:12px; box-shadow:0 18px 40px var(--shadow), 0 0 0 .5px var(--shadow); display:flex; flex-direction:column; overflow:hidden; animation:pop .16s ease-out; }
+  .dlg.wide { width:min(560px, 100%); }
+  .dlg-h { padding:16px 18px 4px; } .dlg-h .t { font-size:14px; font-weight:600; } .dlg-h .s { font-size:11.5px; color:var(--muted); margin-top:2px; }
+  .dlg-b { padding:4px 18px 14px; overflow:auto; }
+  .dlg-f { display:flex; justify-content:flex-end; align-items:center; gap:8px; padding:12px 18px; border-top:1px solid var(--line); }
+  .dlg-f .left { margin-right:auto; }
+  .field { padding:0 12px; height:46px; display:grid; grid-template-columns:96px 1fr; align-items:center; gap:10px; }
+  .field + .field { border-top:1px solid var(--line); }
+  .field label { font-size:12.5px; color:var(--muted); }
+  .field .inp { width:100%; }
+  .hint { font-size:11.5px; color:var(--faint); padding:6px 4px 0; line-height:1.5; }
+  .fp { margin-top:12px; background:var(--surface); border-radius:9px; box-shadow:0 0 0 .5px var(--shadow); padding:12px; }
+  .fp .t { font-size:12.5px; font-weight:500; } .fp code { display:block; font-family:var(--code); font-size:11.5px; margin-top:6px; overflow-wrap:anywhere; }
+  .fp p { font-size:11.5px; color:var(--muted); margin-top:6px; line-height:1.5; } .fp .ok { font-size:12px; color:var(--live); margin-top:8px; }
+  .tests { margin-top:10px; font-size:12px; line-height:1.9; color:var(--muted); padding:0 4px; } .tests b { color:var(--live); margin-right:6px; }
+  .cmdlist .c { display:grid; grid-template-columns:64px 1fr auto; gap:10px; align-items:center; padding:8px 12px; }
+  .cmdlist .c + .c { border-top:1px solid var(--line); }
+  .cmdlist .k { font-size:12px; color:var(--muted); } .cmdlist code { font-family:var(--code); font-size:11.5px; overflow-wrap:anywhere; }
+  .ph { color:var(--faint); } .ph.user { color:var(--live); }
+  .seg { display:inline-flex; background:var(--sel); border-radius:7px; padding:2px; }
+  .seg button { font-size:12px; border:0; background:none; color:var(--muted); padding:4px 12px; border-radius:5px; cursor:pointer; }
+  .seg button.sel { background:var(--surface); color:var(--ink); box-shadow:0 1px 2px var(--shadow); }
+  .swatches { display:flex; gap:10px; }
+  .swatch { width:20px; height:20px; border-radius:50%; border:0; cursor:pointer; box-shadow:0 0 0 1px var(--shadow); }
+  .swatch.sel { box-shadow:0 0 0 2px var(--canvas), 0 0 0 4px var(--live); }
+  select.inp { width:auto; padding-right:24px; }
+  .toast { position:absolute; left:50%; bottom:18px; transform:translateX(-50%); background:var(--ink); color:var(--canvas); font-size:12px; padding:7px 12px; border-radius:7px; opacity:0; transition:opacity .2s; pointer-events:none; white-space:nowrap; z-index:30; }
+  .toast.show { opacity:1; }
+  .spinner { display:inline-block; width:11px; height:11px; border:1.5px solid var(--faint); border-top-color:transparent; border-radius:50%; animation:spin .8s linear infinite; vertical-align:-1px; margin-right:6px; }
+  @keyframes spin { to { transform:rotate(360deg); } } @keyframes fade { from { opacity:0; } } @keyframes pop { from { transform:scale(.97); opacity:0; } }
+  @media (prefers-reduced-motion: reduce) { .scrim, .dlg, .sw, .sw::after, .spinner { animation:none; transition:none; } }
+</style>
+</head>
+<body>
+<div class="demo">
+  <div>
+    <h1>可交互原型 v12</h1>
+    <p>窗口右下角可以拖动调整大小(最小 720×460),第三个窗口按钮切换全屏(Esc 退出)。鼠标移到侧边栏的服务器上,右侧出现 编辑 / 连接·断开 / 删除。jp-vps 演示服务器连不上;win-desktop 离线,不能打开转发。</p>
+  </div>
+  <div class="ctl"><button data-scen="fresh">首次打开</button><button data-scen="ready" class="sel">已配置 3 台服务器</button></div>
+</div>
+<div class="app" id="app" data-accent="green">
+  <aside class="sidebar" id="sidebar"></aside>
+  <section class="main" id="main"></section>
+  <div id="dlg"></div>
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+/* ---------------- i18n ---------------- */
+const I18N = {
+  zh: {
+    servers:'服务器', addServer:'添加服务器', settings:'设置', connectedN:'已连接 {c}', onlineN:'在线 {o}', unreachable:'无法连接',
+    serverSettings:'服务器设置', shareThis:'共享这台电脑', shareHint:'相当于 tunnel server', connectOthers:'连接其他设备', connectHint:'相当于 tunnel client',
+    thisPc:'这台电脑', notShared:'未共享', ready:'已就绪', connecting:'正在连接', failedStopped:'连接失败,已停止重试', keepOn:'无人登录也在线',
+    deviceName:'设备名字', deviceNameHint:'在 {v} 上需唯一', nameTaken:'「{n}」在 {v} 上已被另一台设备使用,换一个名字',
+    unattended:'无人登录时也保持共享', unattendedHint:'开机即在线,无需登录', sshOk:'本机 SSH 服务已开启(端口 22)',
+    offline:'离线', lastSeen:'最后在线 {t}', waiting:'等待上线', portTaken:'{p} 已分配给 {n}', portRange:'请输入 1024–65535 之间的端口',
+    retryIn:'{s} 秒后重试', retryNow:'立即重试', vpsDown:'无法连接 {v}', vpsDownWhy:'连接超时。设备列表是 {t} 前的。',
+    sockDenied:'服务器拒绝监听 socket:{v} 的 sshd 可能没有开启 StreamLocalBindUnlink。在服务器上执行 {cmd} 检查。', retry:'重试', logs:'查看日志',
+    cmdsTitle:'{n} 的连接命令', cmdsOn:'转发已打开,连接 127.0.0.1:{p} 就是 {n}', cmdsOff:'转发未打开:打开开关后这些命令才能连上', cmdsHint:'复制后把 <USERNAME> 换成 {n} 上的用户名,灰色部分换成你的文件和路径。',
+    copy:'复制', copied:'已复制', done:'完成', cancel:'取消', save:'保存', testConn:'测试连接', remove:'移除这台服务器',
+    name:'名称', host:'地址', port:'SSH 端口', user:'登录用户', key:'私钥', nameHint:'名称只在本机使用,不能和已有服务器重名。', nameDup:'已有一台叫「{n}」的服务器',
+    nameBad:'只能用字母、数字和 . _ -', verify:'确认服务器身份', verifyHint:'在服务器上执行 {cmd} 核对,一致后再信任。', trust:'指纹一致,信任', trusted:'✓ 已信任,以后每次连接都会校验',
+    loginOk:'登录成功', dirOk:'可以创建 socket 目录', needTrust:'保存前需要测试连接并信任指纹', testing:'正在连接 {h}…',
+    appearance:'外观', mode:'显示模式', modeAuto:'跟随系统', modeLight:'浅色', modeDark:'深色', accent:'主题色', language:'语言', langAuto:'跟随系统',
+    general:'通用', launchAtLogin:'登录时启动 Tunnel', restore:'启动时自动打开上次的转发', restoreHint:'关闭后,每次启动所有转发都是关着的', about:'关于 Tunnel',
+    emptyTitle:'添加第一台服务器', emptyBody:'服务器是一台只运行 sshd 的 VPS。你的设备都连到它上面,就能按名字互相找到。',
+    fwdOn:'已转发到 127.0.0.1:{p}', fwdOff:'已关闭转发', fwdWait:'{n} 离线,上线后自动接通', added:'已添加 {n}', saved:'已保存 {n}', removed:'已移除 {n}',
+    paused:'已断开', pausedBanner:'已断开 {v}:这台服务器上的共享和转发都已停止,开关状态会保留。', connect:'连接', disconnect:'断开', edit:'编辑', del:'删除',
+    removeTitle:'删除 {v}?', removeBody:'会停止在它上面的共享和 {n} 个转发,并删除这台服务器在本机的配置。服务器上的数据不受影响。', offlineKept:'离线,上线后恢复', cantOffline:'{n} 离线,不能连接',
+    connectedTo:'已连接 {v}', disconnectedFrom:'已断开 {v}',
+    upload:'scp 上传', download:'scp 下载', addr:'地址', localFile:'本地文件', path:'路径', localDir:'本地目录', src:'源', dst:'目标',
+  },
+  en: {
+    servers:'Servers', addServer:'Add server', settings:'Settings', connectedN:'{c} connected', onlineN:'{o} online', unreachable:'Unreachable',
+    serverSettings:'Server settings', shareThis:'Share this computer', shareHint:'tunnel server', connectOthers:'Connect to devices', connectHint:'tunnel client',
+    thisPc:'this computer', notShared:'Not shared', ready:'Ready', connecting:'Connecting', failedStopped:'Failed, stopped retrying', keepOn:'Online without login',
+    deviceName:'Device name', deviceNameHint:'Must be unique on {v}', nameTaken:'“{n}” is already used by another device on {v}',
+    unattended:'Keep sharing when nobody is logged in', unattendedHint:'Online from boot, no login needed', sshOk:'SSH service is on (port 22)',
+    offline:'Offline', lastSeen:'last seen {t}', waiting:'Waiting for device', portTaken:'{p} is assigned to {n}', portRange:'Use a port between 1024 and 65535',
+    retryIn:'Retrying in {s}s', retryNow:'Retry now', vpsDown:'Can’t reach {v}', vpsDownWhy:'Connection timed out. Device list is from {t} ago.',
+    sockDenied:'The server refused the socket: sshd on {v} may lack StreamLocalBindUnlink. Run {cmd} on the server.', retry:'Retry', logs:'View logs',
+    cmdsTitle:'Commands for {n}', cmdsOn:'Forward is on — 127.0.0.1:{p} reaches {n}', cmdsOff:'Forward is off — turn it on before using these', cmdsHint:'Replace <USERNAME> with your user on {n}, and the grey parts with your files and paths.',
+    copy:'Copy', copied:'Copied', done:'Done', cancel:'Cancel', save:'Save', testConn:'Test connection', remove:'Remove this server',
+    name:'Name', host:'Host', port:'SSH port', user:'User', key:'Private key', nameHint:'Only used on this computer. Must be unique.', nameDup:'A server named “{n}” already exists',
+    nameBad:'Letters, digits and . _ - only', verify:'Verify the server', verifyHint:'Run {cmd} on the server and compare before trusting.', trust:'Fingerprint matches, trust', trusted:'✓ Trusted — checked on every connection',
+    loginOk:'Logged in', dirOk:'Socket directory is writable', needTrust:'Test the connection and trust the fingerprint to save', testing:'Connecting to {h}…',
+    appearance:'Appearance', mode:'Mode', modeAuto:'System', modeLight:'Light', modeDark:'Dark', accent:'Accent', language:'Language', langAuto:'System',
+    general:'General', launchAtLogin:'Open Tunnel at login', restore:'Reopen last forwards on launch', restoreHint:'When off, every forward starts closed', about:'About Tunnel',
+    emptyTitle:'Add your first server', emptyBody:'A server is a VPS that only runs sshd. Devices connected to it can find each other by name.',
+    fwdOn:'Forwarding to 127.0.0.1:{p}', fwdOff:'Forward closed', fwdWait:'{n} is offline — connects when it’s back', added:'Added {n}', saved:'Saved {n}', removed:'Removed {n}',
+    paused:'Disconnected', pausedBanner:'{v} is disconnected: sharing and forwards on it are stopped. Their switches are kept.', connect:'Connect', disconnect:'Disconnect', edit:'Edit', del:'Delete',
+    removeTitle:'Delete {v}?', removeBody:'Stops sharing and {n} forward(s) on it and deletes its settings on this computer. Nothing on the server is changed.', offlineKept:'Offline — resumes when back', cantOffline:'{n} is offline',
+    connectedTo:'Connected to {v}', disconnectedFrom:'Disconnected from {v}',
+    upload:'scp up', download:'scp down', addr:'Address', localFile:'local-file', path:'path', localDir:'local-dir', src:'src', dst:'dst',
+  },
+};
+const T = (k, v = {}) => (I18N[S.lang][k] || k).replace(/\{(\w+)\}/g, (_, x) => v[x] ?? '');
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* ---------------- data ---------------- */
+const SELF = 'macbook';
+const ICON = {
+  gear:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>',
+  copy:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+  edit:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>',
+  power:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></svg>',
+  trash:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+  plus:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+};
+const MACHINES = {
+  'home-vps': [
+    { name:'macmini', os:'macOS 15', up:{zh:'在线 3 天',en:'up 3d'}, online:true },
+    { name:'nas', os:'Ubuntu 24.04', up:{zh:'在线 12 天',en:'up 12d'}, online:true },
+    { name:'win-desktop', os:'Windows 11', up:{zh:'2 小时前',en:'2h ago'}, online:false },
+    { name:'pi', os:'Raspberry Pi OS', up:{zh:'10 分钟前',en:'10m ago'}, online:false },
+  ],
+  'hk-vps': [ { name:'lab', os:'Debian 13', up:{zh:'在线 5 小时',en:'up 5h'}, online:true } ],
+  'jp-vps': [ { name:'tokyo-box', os:'Ubuntu 22.04', up:{zh:'在线 2 天',en:'up 2d'}, online:true } ],
+};
+const VPS_READY = [
+  { id:'home-vps', host:'vps.example.com', port:'22', user:'tunnel', key:'~/.ssh/id_ed25519', down:false },
+  { id:'hk-vps', host:'hk.example.net', port:'22', user:'tunnel', key:'~/.ssh/id_ed25519', down:false },
+  { id:'jp-vps', host:'jp.example.org', port:'22', user:'tunnel', key:'~/.ssh/id_ed25519', down:true },
+];
+
+let S = { lang:'zh', mode:'auto', accent:'green', launch:true, restore:true };
+function reset(scen) {
+  const ready = scen === 'ready';
+  Object.assign(S, {
+    vps: ready ? structuredClone(VPS_READY) : [], cur: ready ? 'home-vps' : null,
+    fwd: ready ? { 'home-vps/macmini':true, 'home-vps/pi':true } : {}, ports:{}, portErr:{}, editing:null,
+    share: ready ? { 'hk-vps':{ on:true, sys:false, state:'err' } } : {}, selfName:{}, dlg:null, retry:12,
+  });
+  assignPorts(); render();
+}
+function assignPorts() { for (const v of S.vps) for (const m of (MACHINES[v.id] || [])) { const k = v.id + '/' + m.name; if (!S.ports[k]) { const used = Object.values(S.ports); let p = 5102; while (used.includes(p)) p++; S.ports[k] = p; } } }
+const sh = id => S.share[id] || (S.share[id] = { on:false, sys:false, state:'ok' });
+const vpsOf = id => S.vps.find(v => v.id === id);
+function toast(m) { const t = document.getElementById('toast'); t.textContent = m; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 1700); }
+
+/* ---------------- sidebar ---------------- */
+function sidebar() {
+  return `<div class="side-top"><div class="lights"><i></i><i></i><i class="full" data-act="fullscreen" title="全屏"></i></div></div>
+    <div class="side-title">${T('servers')}</div>
+    <div class="servers">${S.vps.map(v => {
+      const ms = MACHINES[v.id] || [], s = sh(v.id);
+      const c = v.down || v.paused ? 0 : ms.filter(m => m.online && S.fwd[v.id + '/' + m.name]).length, o = ms.filter(m => m.online).length;
+      const dot = v.paused ? 'idle' : v.down ? 'err' : s.on && s.state === 'err' ? 'err' : 'on';
+      const m = v.paused ? T('paused') : v.down ? `<span style="color:var(--fault)">${T('unreachable')}</span>` : `${T('connectedN',{c})}<span class="gap"></span>${T('onlineN',{o})}`;
+      return `<div class="srv ${S.cur === v.id ? 'sel' : ''}">
+        <button class="srv-main" data-act="pick" data-v="${v.id}"><span class="dot ${dot}"></span><div class="grow"><div class="n">${esc(v.id)}</div><div class="m">${m}</div></div></button>
+        <span class="srv-acts">
+          <button class="sa" data-act="edit" data-v="${v.id}" title="${T('edit')}" aria-label="${T('edit')} ${esc(v.id)}">${ICON.edit}</button>
+          <button class="sa ${v.paused ? '' : 'on'}" data-act="togglePause" data-v="${v.id}" title="${v.paused ? T('connect') : T('disconnect')}" aria-label="${v.paused ? T('connect') : T('disconnect')} ${esc(v.id)}">${ICON.power}</button>
+          <button class="sa danger" data-act="askRemove" data-v="${v.id}" title="${T('del')}" aria-label="${T('del')} ${esc(v.id)}">${ICON.trash}</button>
+        </span></div>`;
+    }).join('')}</div>
+    <div class="side-bottom"><button class="addbtn" data-act="add">${ICON.plus}${T('addServer')}</button><button class="icon" data-act="settings" aria-label="${T('settings')}" title="${T('settings')}">${ICON.gear}</button></div>`;
+}
+
+/* ---------------- main ---------------- */
+function main() {
+  if (!S.vps.length) return `<div class="empty"><h2>${T('emptyTitle')}</h2><p>${T('emptyBody')}</p><div style="margin-top:18px"><button class="btn primary" data-act="add">${T('addServer')}</button></div></div>`;
+  const v = vpsOf(S.cur);
+  return `<div class="main-top"><span class="t">${esc(v.id)}</span><span class="h">${esc(v.user)}@${esc(v.host)}</span></div>
+    <div class="content"><div class="col">
+      ${v.paused ? `<div class="banner paused"><span class="dot idle"></span><div class="grow"><div>${T('pausedBanner',{v:esc(v.id)})}</div></div><button class="btn primary" style="padding:5px 14px" data-act="togglePause" data-v="${v.id}">${T('connect')}</button></div>` : ''}
+      ${!v.paused && v.down ? `<div class="banner"><span class="dot err"></span><div class="grow"><div>${T('vpsDown',{v:esc(v.id)})}</div><div>${T('vpsDownWhy',{t: S.lang==='zh' ? '5 分钟' : '5 min'})} <span class="cd">${T('retryIn',{s:S.retry})}</span></div></div><button class="lb" data-act="retryVps" data-v="${v.id}">${T('retryNow')}</button></div>` : ''}
+      <div style="${v.paused ? 'opacity:.5; pointer-events:none' : ''}">${selfCard(v)}${devices(v)}</div>
+    </div></div>`;
+}
+
+function selfCard(v) {
+  const id = v.id, s = sh(id), myName = S.selfName[id] || SELF, ms = MACHINES[id] || [];
+  const clash = ms.find(m => m.name === myName);
+  let dot = 'idle', meta = T('notShared');
+  if (s.on && s.state === 'ok') { dot = 'on'; meta = T('ready'); }
+  if (s.on && s.state === 'connecting') { meta = `<i class="spinner"></i>${T('connecting')}`; }
+  if (s.on && s.state === 'err') { dot = 'err'; meta = T('failedStopped'); }
+  if (s.on && v.paused) { dot = 'idle'; meta = T('paused'); }
+  else if (s.on && v.down) { dot = 'idle'; meta = `<span class="cd">${T('retryIn',{s:S.retry})}</span>`; }
+  if (s.sys) meta += `<span class="gap"></span>${T('keepOn')}`;
+  return `<div class="sec"><div class="sec-head"><span class="t">${T('shareThis')}</span><span class="s">${T('shareHint')}</span></div>
+    <div class="list">
+      <div class="drow"><span class="dot ${dot}"></span><div class="grow"><div class="name">${esc(myName)}<span class="tag">${T('thisPc')}</span></div><div class="meta ${s.on && s.state==='err' && !v.down && !v.paused ? 'err' : ''}">${meta}</div></div>
+        <button class="sw" role="switch" aria-checked="${s.on}" data-act="share" data-v="${id}" aria-label="${T('shareThis')}"></button></div>
+      ${s.on && s.state === 'err' && !v.down && !v.paused ? `<div class="errbox">${T('sockDenied',{v:esc(id), cmd:'<span class="mono">sshd -T | grep -i streamlocal</span>'})}
+        <div style="margin-top:6px"><button class="lb" data-act="retryShare" data-v="${id}">${T('retry')}</button><button class="lb quiet" data-act="toast" data-v="logs">${T('logs')}</button></div></div>` : ''}
+      <div class="sub">
+        <div class="frow"><span class="lbl">${T('deviceName')}<small>${T('deviceNameHint',{v:esc(id)})}</small></span>
+          <input class="inp ${clash ? 'bad' : ''}" style="width:180px" data-selfname="${id}" value="${esc(myName)}" aria-label="${T('deviceName')}"></div>
+        ${clash ? `<div class="ferr">${T('nameTaken',{n:esc(myName), v:esc(id)})}</div>` : ''}
+        <div class="frow"><span class="lbl">${T('unattended')}<small>${T('unattendedHint')}</small></span>
+          <button class="sw" role="switch" aria-checked="${s.sys}" data-act="sys" data-v="${id}" aria-label="${T('unattended')}"></button></div>
+        <div class="check"><span class="tick">✓</span><span>${T('sshOk')}</span></div>
+      </div>
+    </div></div>`;
+}
+
+function devices(v) {
+  const ms = MACHINES[v.id] || [];
+  return `<div class="sec"><div class="sec-head"><span class="t">${T('connectOthers')}</span><span class="s">${T('connectHint')}</span></div>
+    <div class="list ${v.down ? 'stale' : ''}">${ms.map(m => device(v, m)).join('')}</div></div>`;
+}
+
+function device(v, m) {
+  const k = v.id + '/' + m.name, on = !!S.fwd[k], port = S.ports[k], perr = S.portErr[k], editing = S.editing === k;
+  const online = m.online && !v.down;
+  let meta = m.online ? `${m.os}<span class="gap"></span>${m.up[S.lang]}` : `${T('offline')}<span class="gap"></span>${T('lastSeen',{t:m.up[S.lang]})}`;
+  let metaCls = '';
+  if (on && !online) { meta = `${T('offlineKept')}<span class="gap"></span>${T('lastSeen',{t:m.up[S.lang]})}`; }
+  const portEl = editing
+    ? `<input class="inp num ${perr ? 'bad' : ''}" inputmode="numeric" data-port="${k}" value="${perr ? esc(perr.v) : port}" aria-label="${m.name} port">`
+    : `<button class="chip ${on ? 'on' : ''}" data-act="editPort" data-v="${k}" title="127.0.0.1:${port}">${port}</button>`;
+  return `<div class="item ${m.online ? '' : 'offline'}">
+    <div class="drow"><span class="dot ${online ? 'on' : 'off'}"></span>
+      <div class="grow"><div class="name">${m.name}</div><div class="meta ${metaCls}" title="${meta.replace(/<[^>]+>/g,' ')}">${meta}</div></div>
+      <div class="conn">${portEl}<button class="sw" role="switch" aria-checked="${on}" data-act="fwd" data-v="${k}" aria-label="${m.name}" ${!online && !on ? 'disabled' : ''}></button></div>
+      <span class="vsep" aria-hidden="true"></span>
+      <button class="copy" data-act="cmds" data-v="${k}" title="${S.lang==='zh'?'连接命令':'Commands'}">${ICON.copy}</button></div>
+    ${perr ? `<div class="perr">${esc(perr.msg)}</div>` : ''}</div>`;
+}
+
+/* ---------------- dialogs ---------------- */
+function dialog() {
+  const d = S.dlg; if (!d) return '';
+  const wrap = (body, cls = '') => `<div class="scrim" data-act="close"><div class="dlg ${cls}" role="dialog" aria-modal="true">${body}</div></div>`;
+  if (d.type === 'cmds') {
+    const [vid, name] = d.k.split('/'), p = S.ports[d.k], on = !!S.fwd[d.k];
+    return wrap(`<div class="dlg-h"><div class="t">${T('cmdsTitle',{n:name})}</div><div class="s">${on ? T('cmdsOn',{p, n:name}) : T('cmdsOff')}</div></div>
+      <div class="dlg-b"><div class="list cmdlist" style="margin-top:8px">${cmds(p).map(([k, c], i) => `<div class="c"><span class="k">${k}</span><code>${c}</code><button class="lb" data-act="copyCmd" data-v="${i}">${T('copy')}</button></div>`).join('')}</div>
+      <p class="hint">${esc(T('cmdsHint',{n:name}))}</p></div>
+      <div class="dlg-f"><button class="btn primary" data-act="close">${T('done')}</button></div>`, 'wide');
+  }
+  if (d.type === 'confirmRemove') {
+    const n = Object.keys(S.fwd).filter(k => k.startsWith(d.v + '/')).length;
+    return wrap(`<div class="dlg-h"><div class="t">${T('removeTitle',{v:esc(d.v)})}</div></div>
+      <div class="dlg-b"><p style="font-size:12.5px; color:var(--muted); line-height:1.6; margin-top:6px">${T('removeBody',{n})}</p></div>
+      <div class="dlg-f"><button class="btn plain" data-act="close">${T('cancel')}</button><button class="btn dangerfill" data-act="remove" data-v="${esc(d.v)}">${T('del')}</button></div>`);
+  }
+  if (d.type === 'settings') {
+    const seg = (key, opts) => `<span class="seg">${opts.map(([v, l]) => `<button class="${S[key] === v ? 'sel' : ''}" data-act="set" data-k="${key}" data-v="${v}">${l}</button>`).join('')}</span>`;
+    const sw = (key, l, h) => `<div class="frow"><span class="lbl">${l}${h ? `<small>${h}</small>` : ''}</span><button class="sw" role="switch" aria-checked="${S[key]}" data-act="toggleSet" data-k="${key}"></button></div>`;
+    return wrap(`<div class="dlg-h"><div class="t">${T('settings')}</div></div>
+      <div class="dlg-b">
+        <div class="sec" style="margin-top:8px"><div class="sec-head"><span class="t">${T('appearance')}</span></div><div class="list"><div class="sub" style="border:0">
+          <div class="frow"><span class="lbl">${T('mode')}</span>${seg('mode', [['auto',T('modeAuto')],['light',T('modeLight')],['dark',T('modeDark')]])}</div>
+          <div class="frow"><span class="lbl">${T('accent')}</span><span class="swatches">${['green','blue','violet','amber','graphite'].map(a => `<button class="swatch ${S.accent===a?'sel':''}" style="background:${{green:'#13795B',blue:'#2457D6',violet:'#6544E0',amber:'#A85A06',graphite:'#3E4651'}[a]}" data-act="set" data-k="accent" data-v="${a}" aria-label="${a}"></button>`).join('')}</span></div>
+          <div class="frow"><span class="lbl">${T('language')}</span><select class="inp" data-setlang><option value="auto">${T('langAuto')}</option><option value="zh" ${S.lang==='zh'?'selected':''}>简体中文</option><option value="en" ${S.lang==='en'?'selected':''}>English</option></select></div>
+        </div></div></div>
+        <div class="sec"><div class="sec-head"><span class="t">${T('general')}</span></div><div class="list"><div class="sub" style="border:0">
+          ${sw('launch', T('launchAtLogin'))}${sw('restore', T('restore'), T('restoreHint'))}
+          <div class="frow"><span class="lbl">${T('about')}</span><span class="meta" style="margin:0">v0.1.0</span></div>
+        </div></div></div>
+      </div>
+      <div class="dlg-f"><button class="btn primary" data-act="close">${T('done')}</button></div>`);
+  }
+  // server form (add / edit)
+  const f = d, err = formErr(f);
+  const fld = (k) => `<div class="field"><label for="f-${k}">${T(k === 'id' ? 'name' : k)}</label><input id="f-${k}" class="inp" data-field="${k}" value="${esc(f[k])}"></div>`;
+  return wrap(`<div class="dlg-h"><div class="t">${f.edit ? T('serverSettings') : T('addServer')}</div>${f.edit ? `<div class="s">${esc(f.edit)}</div>` : ''}</div>
+    <div class="dlg-b">
+      <div class="list" style="margin-top:8px">${fld('id')}${fld('host')}${fld('port')}${fld('user')}${fld('key')}</div>
+      <p class="hint" id="nameerr" style="${err ? 'color:var(--fault)' : ''}">${err || T('nameHint')}</p>
+      ${f.testing ? `<div class="tests"><i class="spinner"></i>${T('testing',{h:esc(f.host)})}</div>` : ''}
+      ${f.tested ? `<div class="fp"><div class="t">${T('verify')}</div><code>SHA256:k3Vt9Qe1x0Zb7HnUqP2sLw8RfYc4mD6aJ5oE1iT0gXs</code>
+        ${f.trusted ? `<div class="ok">${T('trusted')}</div>` : `<p>${T('verifyHint',{cmd:'<span class="mono">ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</span>'})}</p><div style="margin-top:10px"><button class="btn plain" data-act="trust">${T('trust')}</button></div>`}</div>
+        <div class="tests"><div><b>✓</b>${T('loginOk')}</div><div><b>✓</b>${T('dirOk')}</div></div>` : ''}
+    </div>
+    <div class="dlg-f"><span class="hint left" style="padding:0">${f.trusted ? '' : T('needTrust')}</span>
+      <button class="btn plain" data-act="close">${T('cancel')}</button><button class="btn plain" data-act="test">${T('testConn')}</button>
+      <button class="btn primary" data-act="saveSrv" ${f.trusted && !err ? '' : 'disabled'}>${T('save')}</button></div>`);
+}
+function cmds(p) {
+  const ph = s => `<span class="ph">&lt;${T(s)}&gt;</span>`, at = `<span class="ph user">&lt;USERNAME&gt;</span>@127.0.0.1`;
+  return [['ssh', `ssh -p ${p} ${at}`], [T('upload'), `scp -P ${p} ${ph('localFile')} ${at}:${ph('path')}`], [T('download'), `scp -P ${p} ${at}:${ph('path')} ${ph('localDir')}`],
+          ['rsync', `rsync -av -e "ssh -p ${p}" ${ph('src')} ${at}:${ph('dst')}`], ['sftp', `sftp -P ${p} ${at}`], [T('addr'), `127.0.0.1:${p}`]];
+}
+const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+function formErr(f) { if (!NAME_RE.test(f.id)) return T('nameBad'); if (S.vps.some(v => v.id === f.id && v.id !== f.edit)) return T('nameDup',{n:esc(f.id)}); return ''; }
+function portErr(k, val) { const n = Number(val); if (!/^\d+$/.test(val) || n < 1024 || n > 65535) return T('portRange'); const o = Object.entries(S.ports).find(([kk, p]) => p === n && kk !== k); return o ? T('portTaken',{p:n, n:o[0].split('/')[1]}) : ''; }
+
+/* ---------------- render ---------------- */
+function render() {
+  const app = document.getElementById('app');
+  const dark = S.mode === 'dark' || (S.mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+  app.classList.toggle('dark', dark); app.dataset.accent = S.accent; document.documentElement.lang = S.lang === 'zh' ? 'zh-CN' : 'en';
+  const sc = document.querySelector('.content'), keep = sc ? sc.scrollTop : 0;
+  document.getElementById('sidebar').innerHTML = sidebar();
+  document.getElementById('main').innerHTML = main();
+  const sc2 = document.querySelector('.content'); if (sc2) sc2.scrollTop = keep;
+  document.getElementById('dlg').innerHTML = dialog();
+}
+function renderDlg(sel) { document.getElementById('dlg').innerHTML = dialog(); if (sel) { const i = document.querySelector(sel); if (i) { i.focus(); const n = i.value.length; i.setSelectionRange(n, n); } } }
+
+/* ---------------- events ---------------- */
+document.addEventListener('click', e => {
+  const sc = e.target.closest('[data-scen]');
+  if (sc) { document.querySelectorAll('[data-scen]').forEach(b => b.classList.toggle('sel', b === sc)); reset(sc.dataset.scen); return; }
+  const el = e.target.closest('[data-act]'); if (!el || el.tagName === 'INPUT') return;
+  if (el.classList.contains('scrim') && e.target !== el) return;
+  const a = el.dataset.act, v = el.dataset.v;
+  switch (a) {
+    case 'pick': S.cur = v; S.editing = null; render(); break;
+    case 'add': S.dlg = { type:'form', id: S.vps.length ? 'new-vps' : 'home-vps', host:'vps.example.com', port:'22', user:'tunnel', key:'~/.ssh/id_ed25519', edit:null, tested:false, trusted:false }; renderDlg('#f-id'); break;
+    case 'edit': { const x = vpsOf(v); S.dlg = { type:'form', ...x, edit:v, tested:true, trusted:true }; renderDlg('#f-host'); break; }
+    case 'settings': S.dlg = { type:'settings' }; renderDlg(); break;
+    case 'close': S.dlg = null; render(); break;
+    case 'fullscreen': document.body.classList.toggle('fs'); break;
+    case 'set': S[el.dataset.k] = v; render(); break;
+    case 'toggleSet': S[el.dataset.k] = !S[el.dataset.k]; renderDlg(); break;
+    case 'share': { const s = sh(v); if (!s.on && (MACHINES[v] || []).some(m => m.name === (S.selfName[v] || SELF))) { toast(T('nameTaken',{n:S.selfName[v] || SELF, v})); return; }
+      s.on = !s.on; if (s.on && !vpsOf(v).down) { s.state = 'connecting'; render(); setTimeout(() => { s.state = 'ok'; render(); }, 1100); } else render(); break; }
+    case 'sys': sh(v).sys = !sh(v).sys; render(); break;
+    case 'retryShare': sh(v).state = 'connecting'; render(); setTimeout(() => { sh(v).state = 'ok'; render(); }, 1100); break;
+    case 'retryVps': S.retry = 30; render(); toast(S.lang === 'zh' ? '仍然无法连接,30 秒后再试' : 'Still unreachable, retrying in 30s'); break;
+    case 'fwd': { const [vid, name] = v.split('/'), m = MACHINES[vid].find(x => x.name === name), online = m.online && !vpsOf(vid).down;
+      if (S.fwd[v]) { delete S.fwd[v]; toast(T('fwdOff')); } else if (!online) { toast(T('cantOffline',{n:name})); return; } else { S.fwd[v] = true; toast(T('fwdOn',{p:S.ports[v]})); } render(); break; }
+    case 'editPort': S.editing = v; render(); { const i = document.querySelector(`[data-port="${v}"]`); if (i) { i.focus(); i.select(); } } break;
+    case 'cmds': S.dlg = { type:'cmds', k:v }; renderDlg(); break;
+    case 'copyCmd': { const c = cmds(S.ports[S.dlg.k])[Number(v)][1].replace(/<[^>]+>/g, '').replace(/&lt;/g,'<').replace(/&gt;/g,'>'); toast(T('copied') + ': ' + c); break; }
+    case 'test': S.dlg.testing = true; S.dlg.tested = S.dlg.trusted = false; renderDlg(); setTimeout(() => { if (!S.dlg) return; S.dlg.testing = false; S.dlg.tested = true; renderDlg(); }, 900); break;
+    case 'trust': S.dlg.trusted = true; renderDlg(); break;
+    case 'saveSrv': { const f = S.dlg, item = { id:f.id, host:f.host, port:f.port, user:f.user, key:f.key, down:false };
+      if (!MACHINES[f.id]) MACHINES[f.id] = structuredClone(MACHINES['home-vps']);
+      if (f.edit) { const i = S.vps.findIndex(x => x.id === f.edit); item.down = S.vps[i].down; S.vps[i] = item; } else S.vps.push(item);
+      S.cur = f.id; S.dlg = null; assignPorts(); render(); toast(T(f.edit ? 'saved' : 'added', {n:f.id})); break; }
+    case 'askRemove': S.dlg = { type:'confirmRemove', v }; renderDlg(); { const b = document.querySelector('.dlg .btn.plain'); if (b) b.focus(); } break;
+    case 'togglePause': { const x = vpsOf(v); x.paused = !x.paused; S.cur = v; render(); toast(T(x.paused ? 'disconnectedFrom' : 'connectedTo', {v})); break; }
+    case 'remove': S.vps = S.vps.filter(x => x.id !== v); S.cur = S.vps[0] ? S.vps[0].id : null; S.dlg = null; render(); toast(T('removed',{n:v})); break;
+    case 'toast': toast(T('logs')); break;
+  }
+});
+document.addEventListener('input', e => {
+  const k = e.target.dataset.field;
+  if (k && S.dlg) { S.dlg[k] = e.target.value; if (k !== 'id') S.dlg.tested = S.dlg.trusted = false; renderDlg(`[data-field="${k}"]`); }
+});
+document.addEventListener('change', e => {
+  if (e.target.matches('[data-setlang]')) { S.lang = e.target.value === 'auto' ? (navigator.language.startsWith('zh') ? 'zh' : 'en') : e.target.value; render(); return; }
+  const pk = e.target.dataset.port;
+  if (pk) { const val = e.target.value.trim(), msg = portErr(pk, val);
+    if (msg) S.portErr[pk] = { v:val, msg }; else { delete S.portErr[pk]; S.editing = null; const ch = S.ports[pk] !== Number(val); S.ports[pk] = Number(val); if (ch) toast(`→ ${val}`); }
+    render(); const i = document.querySelector(`[data-port="${pk}"]`); if (i) i.focus(); return; }
+  const id = e.target.dataset.selfname; if (id) { S.selfName[id] = e.target.value.trim() || SELF; render(); }
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { if (S.dlg) { S.dlg = null; render(); } else if (S.editing) { delete S.portErr[S.editing]; S.editing = null; render(); } else document.body.classList.remove('fs'); }
+  if (e.key === 'Enter' && e.target.dataset && e.target.dataset.port) e.target.blur();
+});
+document.addEventListener('focusout', e => { const pk = e.target.dataset && e.target.dataset.port; if (pk && !S.portErr[pk] && Number(e.target.value) === S.ports[pk]) { S.editing = null; setTimeout(render); } });
+setInterval(() => { if (S.vps && S.vps.some(v => v.down)) { S.retry = S.retry > 1 ? S.retry - 1 : 30; document.querySelectorAll('.cd').forEach(n => n.textContent = T('retryIn',{s:S.retry})); } }, 1000);
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => render());
+reset('ready');
+</script>
+</body>
+</html>
