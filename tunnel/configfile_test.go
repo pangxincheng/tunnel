@@ -71,3 +71,18 @@ func TestLoadTOMLExplicitZeroListenPort(t *testing.T) {
 		t.Fatalf("显式 0 应保留为指针 0: %+v", fc.RemoteListenPort)
 	}
 }
+
+func TestLoadTOMLNameFields(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "tunnel.toml")
+	os.WriteFile(p, []byte(`
+name = "nas"
+remote_socket_dir = "/srv/tn"
+`), 0o600)
+	fc, err := LoadTOML(p)
+	if err != nil {
+		t.Fatalf("LoadTOML: %v", err)
+	}
+	if fc.Name != "nas" || fc.RemoteSocketDir != "/srv/tn" {
+		t.Fatalf("名字字段: %+v", fc)
+	}
+}

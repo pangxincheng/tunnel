@@ -13,6 +13,15 @@ remote_ssh_pub = "~/.ssh/vps_host.pub"   # 也支持内联 "ssh-ed25519 AAAA..."
 # server 侧:内网转发目标端口(sshd);client 侧:本机监听端口
 local_ssh_port = 5102
 
+# 汇合点二选一:remote_listen_port(VPS loopback 端口)或 name(VPS 上的 Unix socket)。
+#
+# 按名字转发(推荐):VPS 上 <remote_socket_dir>/<name>.sock,server/client 名字一致即可。
+# 需要 VPS sshd 开启 StreamLocalBindUnlink yes;名字模式下 client 必须给 local_ssh_port。
+# name = "nas"
+# socket 目录(绝对路径)。不写 = 每次连接后自动 mkdir 并解析 $HOME/.tunnel/sockets;
+# 账户不允许执行命令(nologin/ForceCommand)时必须写,并在 VPS 上预先创建该目录(chmod 700)。
+# remote_socket_dir = "/home/tunnel/.tunnel/sockets"
+
 # VPS loopback 上的汇合端口,server/client 必须一致。
 # server 侧写 0 = 让 VPS 自动分配(实际端口见启动日志;重连会重新分配)。
 remote_listen_port = 5102

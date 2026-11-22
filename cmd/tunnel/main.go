@@ -2,8 +2,8 @@
 //
 // 子命令:
 //
-//	tunnel server  内网侧守护:反向转发(VPS loopback:PORT → 内网 sshd)
-//	tunnel client  客户端守护:正向转发(本机 LISTEN → VPS loopback:PORT)
+//	tunnel server  内网侧守护:反向转发(VPS loopback:PORT 或 VPS socket NAME.sock → 内网 sshd)
+//	tunnel client  客户端守护:正向转发(本机 LISTEN → VPS loopback:PORT 或 VPS socket NAME.sock)
 //	tunnel version 打印版本
 //
 // 参数解析采用 docopt:usage 文本即语法定义,ParseArgs 产出 map;
@@ -19,8 +19,10 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/docopt/docopt-go"
@@ -50,7 +52,9 @@ Options:
   --local-ssh-key=PATH     本机私钥(默认 ~/.ssh/id_ed25519)
   --user=USER              VPS 登录用户(默认 $USER)
   --local-ssh-port=N       本地端口(server: 内网 sshd,默认 22;client: 本机监听,默认跟随汇合端口)
-  --remote-listen-port=N   VPS loopback 汇合端口(server 传 0 = 由 VPS 自动分配,实际端口见启动日志)
+  --remote-listen-port=N   VPS loopback 汇合端口(与 --name 二选一;server 传 0 = 由 VPS 自动分配,实际端口见启动日志)
+  --name=NAME              按名字转发:VPS 上 <socket目录>/NAME.sock(与 --remote-listen-port 二选一)
+  --remote-socket-dir=DIR  VPS 上的 socket 目录(绝对路径;默认连接后执行 mkdir 解析 $HOME/.tunnel/sockets)
 `
 
 func main() {
@@ -108,7 +112,6 @@ func runCmd(args map[string]interface{}, role string, logger *slog.Logger) {
 		fatal(logger, err)
 	}
 
-	remote := fmt.Sprintf("127.0.0.1:%d", p.remoteListenPort)
 	local := fmt.Sprintf("127.0.0.1:%d", p.localSSHPort)
 
 	logger.Info("tunnel 启动", "version", tunnel.Version, "role", role)
@@ -118,6 +121,36 @@ func runCmd(args map[string]interface{}, role string, logger *slog.Logger) {
 		logger.Info("配置来源", "source", source)
 	}
 	logger.Info("SSH 目标", "addr", cfg.SSHAddr, "user", cfg.User, "key", cfg.KeyPath)
+	if p.name != "" {
+		err = runNameMode(p, cfg, role, local, logger)
+	} else {
+		err = runPortMode(p, cfg, role, local, logger)
+	}
+	if err != nil {
+		fatal(logger, err)
+	}
+	logger.Info("tunnel 已停止")
+}
+
+// runNameMode 按名字转发:汇合点是 VPS 上的 <socket目录>/<name>.sock。
+func runNameMode(p *params, cfg *tunnel.Config, role, local string, logger *slog.Logger) error {
+	sock := path.Join(p.remoteSocketDir, p.name+".sock")
+	if p.remoteSocketDir == "" {
+		sock = "$HOME/.tunnel/sockets/" + p.name + ".sock(连接后解析)"
+	}
+	fl := tunnel.WithForwardLogger(logger)
+	if role == "server" {
+		logger.Info("反向转发计划", "name", p.name, "vps_socket", sock, "inner_target", local)
+		return run(tunnel.NewClient(cfg, tunnel.ReverseForwardUnix(p.remoteSocketDir, p.name, local, fl), tunnel.WithLogger(logger)))
+	}
+	logger.Info("正向转发计划", "name", p.name, "local_listen", local, "vps_socket", sock)
+	return run(tunnel.NewClient(cfg, tunnel.LocalForwardUnix(local, p.remoteSocketDir, p.name, fl), tunnel.WithLogger(logger)))
+}
+
+// runPortMode 按端口转发:汇合点是 VPS loopback 上的 TCP 端口。
+func runPortMode(p *params, cfg *tunnel.Config, role, local string, logger *slog.Logger) error {
+	var err error
+	remote := fmt.Sprintf("127.0.0.1:%d", p.remoteListenPort)
 	vpsListen := remote
 	if p.remoteListenPort == 0 {
 		vpsListen = "自动分配(VPS 选择)"
@@ -132,10 +165,7 @@ func runCmd(args map[string]interface{}, role string, logger *slog.Logger) {
 		logger.Info("正向转发计划", "local_listen", local, "vps_target", remote)
 		err = run(tunnel.NewClient(cfg, tunnel.LocalForward(local, remote, tunnel.WithForwardLogger(logger)), tunnel.WithLogger(logger)))
 	}
-	if err != nil {
-		fatal(logger, err)
-	}
-	logger.Info("tunnel 已停止")
+	return err
 }
 
 // params 是合并后的全部参数。
@@ -149,6 +179,9 @@ type params struct {
 	remoteListenPort int
 	// remoteListenPortSet 区分"未配置"(false)与"显式 0"(true,server 自动分配)。
 	remoteListenPortSet bool
+	// name 非空 = 名字模式(与端口模式互斥,二者由 merge 选定其一)。
+	name            string
+	remoteSocketDir string
 }
 
 func (p *params) config(role string) (*tunnel.Config, error) {
@@ -158,14 +191,12 @@ func (p *params) config(role string) (*tunnel.Config, error) {
 	if p.remoteSSHPub == "" {
 		return nil, fmt.Errorf("缺少 --remote-ssh-pub(或配置文件 remote_ssh_pub)")
 	}
-	if !p.remoteListenPortSet {
-		return nil, fmt.Errorf("缺少 --remote-listen-port(或配置文件 remote_listen_port;server 传 0 表示由 VPS 自动分配)")
-	}
-	if p.remoteListenPort < 0 || p.remoteListenPort > 65535 {
-		return nil, fmt.Errorf("--remote-listen-port 超出范围(0-65535):%d", p.remoteListenPort)
-	}
-	if role == "client" && p.remoteListenPort == 0 {
-		return nil, fmt.Errorf("client 模式必须指定 VPS 上的实际端口;自动分配仅限 server,分配结果见 server 的「隧道就绪」日志")
+	if p.name != "" {
+		if err := p.checkNameMode(role); err != nil {
+			return nil, err
+		}
+	} else if err := p.checkPortMode(role); err != nil {
+		return nil, err
 	}
 	if p.remoteSSHPort < 1 || p.remoteSSHPort > 65535 {
 		return nil, fmt.Errorf("--remote-ssh-port 超出范围(1-65535):%d", p.remoteSSHPort)
@@ -176,6 +207,35 @@ func (p *params) config(role string) (*tunnel.Config, error) {
 		KeyPath: p.localSSHKey,
 		HostPub: p.remoteSSHPub,
 	}, nil
+}
+
+func (p *params) checkNameMode(role string) error {
+	if err := tunnel.ValidateName(p.name); err != nil {
+		return err
+	}
+	if p.remoteSocketDir != "" && !strings.HasPrefix(p.remoteSocketDir, "/") {
+		return fmt.Errorf("--remote-socket-dir 必须是绝对路径:%q", p.remoteSocketDir)
+	}
+	if role == "client" && p.localSSHPort == 0 {
+		return fmt.Errorf("名字模式下 client 必须指定 --local-ssh-port(本机监听端口)")
+	}
+	if p.localSSHPort < 1 || p.localSSHPort > 65535 {
+		return fmt.Errorf("--local-ssh-port 超出范围(1-65535):%d", p.localSSHPort)
+	}
+	return nil
+}
+
+func (p *params) checkPortMode(role string) error {
+	if !p.remoteListenPortSet {
+		return fmt.Errorf("缺少 --name 或 --remote-listen-port(或配置文件 name / remote_listen_port;server 传端口 0 表示由 VPS 自动分配)")
+	}
+	if p.remoteListenPort < 0 || p.remoteListenPort > 65535 {
+		return fmt.Errorf("--remote-listen-port 超出范围(0-65535):%d", p.remoteListenPort)
+	}
+	if role == "client" && p.remoteListenPort == 0 {
+		return fmt.Errorf("client 模式必须指定 VPS 上的实际端口;自动分配仅限 server,分配结果见 server 的「隧道就绪」日志")
+	}
+	return nil
 }
 
 // merge 按 docopt map → TOML → 内置默认的优先级合并参数。
@@ -198,6 +258,13 @@ func merge(args map[string]interface{}, fc *tunnel.FileConfig, role string) (*pa
 	if err != nil {
 		return nil, err
 	}
+	name, err := selectMode(args, fc)
+	if err != nil {
+		return nil, err
+	}
+	if name != "" { // 名字模式:端口(只可能来自被 flag 压过的 TOML)忽略
+		remoteListenPort, remoteListenPortSet = 0, false
+	}
 
 	p := &params{
 		remoteIP:            strArg(args, "--remote-ip", fc.RemoteIP),
@@ -208,18 +275,42 @@ func merge(args map[string]interface{}, fc *tunnel.FileConfig, role string) (*pa
 		localSSHPort:        localSSHPort,
 		remoteListenPort:    remoteListenPort,
 		remoteListenPortSet: remoteListenPortSet,
+		name:                name,
+		remoteSocketDir:     strArg(args, "--remote-socket-dir", fc.RemoteSocketDir),
 	}
 	// local-ssh-key 的 ~ 展开(docopt 默认值不会展开)
 	p.localSSHKey = expandHome(p.localSSHKey)
 
 	if p.localSSHPort == 0 {
-		if role == "server" {
+		switch {
+		case role == "server":
 			p.localSSHPort = defaultInnerSSHPort
-		} else {
+		case p.name == "":
 			p.localSSHPort = p.remoteListenPort
 		}
+		// 名字模式的 client 没有可跟随的汇合端口:保持 0,由 config 报必填
 	}
 	return p, nil
+}
+
+// selectMode 在名字模式与端口模式间选定其一,返回名字(空 = 端口模式)。
+// 规则:同一来源(flag 或 TOML)两者都给 → 互斥错误;flag 胜过 TOML,
+// 被压过的另一项忽略。都没给时返回空,由 config 报缺少参数。
+func selectMode(args map[string]interface{}, fc *tunnel.FileConfig) (string, error) {
+	flagName := strArg(args, "--name", "")
+	flagPort := strArg(args, "--remote-listen-port", "") != ""
+	switch {
+	case flagName != "" && flagPort:
+		return "", fmt.Errorf("--name 与 --remote-listen-port 只能二选一")
+	case flagName != "":
+		return flagName, nil
+	case flagPort:
+		return "", nil
+	case fc.Name != "" && fc.RemoteListenPort != nil:
+		return "", fmt.Errorf("配置文件中 name 与 remote_listen_port 只能二选一")
+	default:
+		return fc.Name, nil
+	}
 }
 
 // strArg/intArg:docopt 已给出(非 nil/非空)则用之,否则回落 fallback。

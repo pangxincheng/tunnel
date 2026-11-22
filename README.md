@@ -32,6 +32,7 @@
 特性:
 
 - **双命令**:`tunnel server`(内网侧,反向转发)+ `tunnel client`(客户端侧,正向转发)
+- **按名字转发**:`--name nas` 以 VPS 上的 Unix socket 作汇合点,不用记端口,断线重连不撞车
 - **断线自愈**:应用层 keepalive 探活,指数退避自动重连
 - **主机公钥钉住**:不使用 TOFU,配置里钉死 VPS 公钥,不匹配即拒绝
 - **纯 Go 库**:核心在 `tunnel/` 包,移动端可经 gomobile 直接调用(无系统 ssh 依赖)
@@ -60,6 +61,13 @@ go test ./...
 - 确认 sshd 正常运行(默认配置即可,反向转发绑定 loopback 不需要 `GatewayPorts`)
 - 建议建一个纯转发低权限账户,并把你的公钥加入其 `~/.ssh/authorized_keys`
 - 抄下 VPS 的主机公钥:`cat /etc/ssh/ssh_host_ed25519_key.pub`(或客户端上 `ssh-keyscan -t ed25519 <VPS>`,并核对指纹)
+
+如果要用按名字转发(推荐,见下文),在 VPS 的 `/etc/ssh/sshd_config` 中加入后执行 `sudo systemctl reload ssh`:
+
+```
+StreamLocalBindUnlink yes        # 必需:重连时替换上次残留的 socket 文件
+AllowStreamLocalForwarding yes   # 默认即 yes;配置被收紧过时需确认
+```
 
 ### 2. 内网服务器上启动 server
 
@@ -110,6 +118,28 @@ tunnel client --local-ssh-port 9999   # flag 覆盖配置
 ```
 
 优先级:**默认值 < 配置文件 < 命令行 flag**;用 `-c/--config` 指定其他路径。
+
+### 按名字转发(推荐)
+
+用 `--name` 代替 `--remote-listen-port`:server 在 VPS 上监听 `~/.tunnel/sockets/<name>.sock`,client 按同一名字连接,不需要记 VPS 端口。断线重连时,sshd(`StreamLocalBindUnlink yes`)会替换残留的 socket,不会出现端口被旧连接占住的问题。
+
+```bash
+# 内网服务器
+tunnel server --name nas --remote-ip vps.example.com --remote-ssh-pub ~/.ssh/vps_host.pub
+# 客户端:名字模式下必须指定本机监听端口
+tunnel client --name nas --local-ssh-port 5102 --remote-ip vps.example.com --remote-ssh-pub ~/.ssh/vps_host.pub
+ssh -p 5102 <内网用户>@127.0.0.1
+```
+
+TOML 中写 `name = "nas"`。`name` 与 `remote_listen_port` 只能二选一;同时出现时,命令行 flag 优先,被压过的那一项忽略。
+
+注意:
+
+- **名字需全局唯一**:两台机器用同一个名字时,后连上的一台会顶替前一台。
+- **socket 目录**:默认每次连接后在 VPS 上执行 `mkdir -p -m 700 "$HOME/.tunnel/sockets"`,自动创建并解析目录。如果 tunnel 账户不允许执行命令(shell 为 nologin 或设置了 ForceCommand),请配置 `remote_socket_dir`(`--remote-socket-dir`,绝对路径),并在 VPS 上预先创建该目录、`chmod 700`。
+- 目录权限为 700,只有 tunnel 账户能连接这些 socket。这比 loopback 端口(VPS 上任何本地用户都能连)更收紧。
+- 名字只能包含字母、数字和 `. _ -`,须以字母或数字开头,最长 64 个字符。socket 完整路径不能超过 103 字节。
+- 如果 VPS 拒绝 socket 转发,tunnel 会提示检查 `StreamLocalBindUnlink` / `AllowStreamLocalForwarding`,并以退出码 1 终止。
 
 ### 让 VPS 自动分配汇合端口(仅 server)
 
@@ -173,6 +203,8 @@ c.Run(ctx) // 守护:keepalive + 退避重连
 // tunnel.NewClient(cfg, tunnel.ReverseForward("127.0.0.1:5102", "127.0.0.1:22"))
 ```
 
+按名字转发对应 `tunnel.ReverseForwardUnix(dir, "nas", "127.0.0.1:22")` / `tunnel.LocalForwardUnix("127.0.0.1:5102", dir, "nas")`(`dir` 传 `""` 表示连接后自动解析 `$HOME/.tunnel/sockets`)。
+
 `ReverseForward`/`LocalForward` 工厂已内置 listener 创建与 accept/代理循环,开箱即用。
 
 经 `gomobile bind` 编译即可供 iOS/Android 调用。
@@ -185,8 +217,8 @@ c.Run(ctx) // 守护:keepalive + 退避重连
 
 ## 文档
 
-- 设计文档:`docs/superpowers/specs/2026-08-14-tunnel-design.md`
-- 实施计划:`docs/superpowers/plans/2026-08-14-tunnel-orchestrator.md`
+- 设计文档:`docs/superpowers/specs/2026-08-14-tunnel-design.md`、`docs/superpowers/specs/2026-11-22-name-forwarding-design.md`(按名字转发)
+- 实施计划:`docs/superpowers/plans/2026-08-14-tunnel-orchestrator.md`、`docs/superpowers/plans/2026-11-22-name-forwarding.md`
 - 变更记录:`CHANGELOG.md`
 
 ## License

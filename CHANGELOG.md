@@ -7,6 +7,8 @@
 - 新增 `ReverseForwardUnix(dir, name, localAddr)` / `LocalForwardUnix(localAddr, dir, name)`:经 VPS 上的 Unix socket 按名字转发(`streamlocal-forward@openssh.com` / `direct-streamlocal@openssh.com`),签名与现有工厂同构,可直接传给 `NewClient`;断线重连时残留 socket 由 sshd 的 `StreamLocalBindUnlink` 替换。
 - 新增 `RemoteSocketListenError`:sshd 拒绝 socket 转发时提示检查 `StreamLocalBindUnlink` / `AllowStreamLocalForwarding`,并给出 `ls -l` 与 `sshd -T` 排查命令。
 - 四个转发工厂改为共用同一个 accept/代理循环(行为与日志文案不变);client 侧拨号失败日志附带名字。
+- CLI 新增 `--name NAME` / `--remote-socket-dir DIR`(TOML `name` / `remote_socket_dir`):`--name` 与 `--remote-listen-port` 二选一,同一来源两者都给报错,flag 优先于 TOML;名字模式下 client 必须给 `--local-ssh-port`;启动日志打印 `name` 与 `vps_socket`。
+- README 新增「按名字转发(推荐)」一节,并在准备步骤中加入 sshd 的 `StreamLocalBindUnlink yes` 配置;`tunnel.toml.example` 补充 `name` / `remote_socket_dir` 示例。
 - 测试 SSH 服务器支持 session/exec 与 streamlocal 转发;新增实现计划 `docs/superpowers/plans/2026-11-22-name-forwarding.md`。
 
 ## 2026-11-22(按名字转发设计)

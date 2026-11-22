@@ -16,7 +16,9 @@ import (
 //
 //	remote_ip / remote_ssh_port / remote_ssh_pub / local_ssh_key / user
 //	local_ssh_port      server: 内网 sshd 端口;client: 本机监听端口
-//	remote_listen_port  VPS loopback 汇合端口
+//	remote_listen_port  VPS loopback 汇合端口(与 name 二选一)
+//	name                按名字转发:VPS 上 <remote_socket_dir>/<name>.sock
+//	remote_socket_dir   VPS 上的 socket 目录(绝对路径;空 = 连接后自动解析)
 //
 // RemoteListenPort 用指针区分"未配置"(nil)与"显式 0"(server 让 VPS
 // 自动分配端口):同为零值,语义完全不同。
@@ -28,6 +30,8 @@ type FileConfig struct {
 	User             string `toml:"user"`
 	LocalSSHPort     int    `toml:"local_ssh_port"`
 	RemoteListenPort *int   `toml:"remote_listen_port"`
+	Name             string `toml:"name"`
+	RemoteSocketDir  string `toml:"remote_socket_dir"`
 }
 
 // LoadTOML 读取 TOML 配置文件;路径类字段做 ~ 展开。
