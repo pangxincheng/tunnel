@@ -2,6 +2,7 @@
 
 ## 2026-11-22(tunnel-app 支持)
 
+- 新增设备 ID 与本机设备信息(`tunnel/device.go`):`DeviceID()` 取平台机器标识(macOS `IOPlatformUUID`、Linux `/etc/machine-id` 回退 `/var/lib/dbus/machine-id`、Windows 注册表 `MachineGuid`),派生为 `hex(sha256("tunnel-device-id:"+raw)[:16])`;`LocalDeviceInfo(name, startedAt)` 返回含 device_id/name/hostname/os/os_version/arch/tunnel_version/started_at 的 `DeviceInfo`。`golang.org/x/sys` 升为直接依赖(Windows 注册表)。
 - 新增实现计划 `docs/superpowers/plans/2026-11-22-core-for-tunnel-app.md`:为 tunnel-app 一期提供设备信息文件与设备列表、多转发 Session、可暂停/重试的 Share 运行时、本机控制通道、`tunnel install/uninstall/status/pause/resume/retry`。
 
 ## 2026-11-22(按名字转发)
