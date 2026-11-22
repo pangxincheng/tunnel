@@ -4,7 +4,10 @@
 
 - 新增 `ValidateName` / `ResolveSocketPath`(`tunnel/socket.go`):校验服务名(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`),并解析 VPS 上的 socket 路径 `<dir>/<name>.sock`;未指定目录时经 SSH exec 执行 `mkdir -p -m 700 "$HOME/.tunnel/sockets"` 自动创建并取回绝对路径,路径超过 103 字节报不可恢复错误。
 - 新增 `SocketDirError`:账户不允许执行命令时给出配置 `remote_socket_dir` 的提示。
-- 测试 SSH 服务器支持 session/exec;新增实现计划 `docs/superpowers/plans/2026-11-22-name-forwarding.md`。
+- 新增 `ReverseForwardUnix(dir, name, localAddr)` / `LocalForwardUnix(localAddr, dir, name)`:经 VPS 上的 Unix socket 按名字转发(`streamlocal-forward@openssh.com` / `direct-streamlocal@openssh.com`),签名与现有工厂同构,可直接传给 `NewClient`;断线重连时残留 socket 由 sshd 的 `StreamLocalBindUnlink` 替换。
+- 新增 `RemoteSocketListenError`:sshd 拒绝 socket 转发时提示检查 `StreamLocalBindUnlink` / `AllowStreamLocalForwarding`,并给出 `ls -l` 与 `sshd -T` 排查命令。
+- 四个转发工厂改为共用同一个 accept/代理循环(行为与日志文案不变);client 侧拨号失败日志附带名字。
+- 测试 SSH 服务器支持 session/exec 与 streamlocal 转发;新增实现计划 `docs/superpowers/plans/2026-11-22-name-forwarding.md`。
 
 ## 2026-11-22(按名字转发设计)
 

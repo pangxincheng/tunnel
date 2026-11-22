@@ -1,7 +1,9 @@
 package tunnel
 
 import (
+	"bufio"
 	"context"
+	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -90,4 +92,45 @@ func TestRunFailsFastOnPermanentError(t *testing.T) {
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Fatalf("未快速失败,耗时 %v", elapsed)
 	}
+}
+
+// TestClientReconnectsWithNameForwarding:名字模式下断线重连后,
+// 同一 socket 路径重新可用(旧 socket 残留被替换)。
+func TestClientReconnectsWithNameForwarding(t *testing.T) {
+	privPath, pub := writeClientKey(t)
+	server := startTestSSHServer(t, pub)
+	echo := startEchoServer(t)
+
+	cfg := &Config{
+		SSHAddr: server.Addr(), User: "u", KeyPath: privPath,
+		HostPub: writeHostPub(t, server.HostKey),
+	}
+	c := NewClient(cfg, ReverseForwardUnix("", "nas", echo))
+	c.keepaliveInterval = 50 * time.Millisecond
+	c.reconnectMin = 10 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go c.Run(ctx)
+
+	sock := server.Home + "/.tunnel/sockets/nas.sock"
+	reachable := func() bool {
+		conn, err := net.Dial("unix", sock)
+		if err != nil {
+			return false
+		}
+		defer conn.Close()
+		conn.SetDeadline(time.Now().Add(time.Second))
+		fmt.Fprintln(conn, "ping")
+		got, _ := bufio.NewReader(conn).ReadString('\n')
+		return got == "echo: ping\n"
+	}
+	waitFor(t, 3*time.Second, reachable)
+	server.CloseAllClients()
+	waitFor(t, 3*time.Second, func() bool {
+		server.mu.Lock()
+		defer server.mu.Unlock()
+		return server.totalConns >= 2
+	})
+	waitFor(t, 3*time.Second, reachable)
 }

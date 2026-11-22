@@ -90,3 +90,28 @@ func (e *SocketDirError) Unwrap() error { return e.Cause }
 func (e *SocketDirError) Is(target error) bool {
 	return target == ErrPermanent
 }
+
+// RemoteSocketListenError 表示 VPS 上的 sshd 拒绝了 streamlocal-forward 请求。
+// 与 tcpip-forward 一样,OpenSSH 只回通用失败,常见原因:
+//   - 未开启 StreamLocalBindUnlink,上次连接残留的 socket 文件阻塞了绑定;
+//   - sshd 关闭了 AllowStreamLocalForwarding;
+//   - socket 目录不存在或无写权限。
+type RemoteSocketListenError struct {
+	Path  string // VPS 上的 socket 完整路径
+	Cause error
+}
+
+func (e *RemoteSocketListenError) Error() string {
+	return fmt.Sprintf(
+		"VPS 拒绝监听 socket %s:sshd 未接受 streamlocal-forward 请求(%v)。"+
+			"常见原因:sshd 未开启 StreamLocalBindUnlink,残留 socket 文件阻塞绑定"+
+			"(在 VPS 上执行 `ls -l %s` 确认),或 sshd 未允许 AllowStreamLocalForwarding"+
+			"(执行 `sshd -T | grep -i streamlocal` 查看)",
+		e.Path, e.Cause, e.Path,
+	)
+}
+
+func (e *RemoteSocketListenError) Unwrap() error { return e.Cause }
+func (e *RemoteSocketListenError) Is(target error) bool {
+	return target == ErrPermanent
+}

@@ -38,6 +38,10 @@ type testSSHServer struct {
 	ExecOutput func(cmd string) (stdout string, exit uint32)
 	execMu     sync.Mutex
 	execs      int
+
+	// BindUnlink 模拟 sshd 的 StreamLocalBindUnlink(默认开启):绑定前删除残留 socket。
+	BindUnlink   bool
+	unixForwards map[string]net.Listener
 }
 
 func startTestSSHServer(t *testing.T, authorized ssh.PublicKey) *testSSHServer {
@@ -50,7 +54,7 @@ func startTestSSHServer(t *testing.T, authorized ssh.PublicKey) *testSSHServer {
 	ecKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	ecSigner, _ := ssh.NewSignerFromKey(ecKey)
 
-	s := &testSSHServer{t: t, HostKey: edSigner.PublicKey()}
+	s := &testSSHServer{t: t, HostKey: edSigner.PublicKey(), BindUnlink: true}
 	s.config = &ssh.ServerConfig{
 		PublicKeyCallback: func(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 			if string(key.Marshal()) == string(authorized.Marshal()) {
@@ -111,6 +115,19 @@ func (s *testSSHServer) handleGlobalRequests(conn *ssh.ServerConn, reqs <-chan *
 			req.Reply(true, nil)
 		case "tcpip-forward":
 			s.handleForwardRequest(conn, req)
+		case "streamlocal-forward@openssh.com":
+			s.handleStreamLocalForward(conn, req)
+		case "cancel-streamlocal-forward@openssh.com":
+			var p struct{ SocketPath string }
+			if ssh.Unmarshal(req.Payload, &p) == nil {
+				s.forwardsMu.Lock()
+				if l, ok := s.unixForwards[p.SocketPath]; ok {
+					l.Close()
+					delete(s.unixForwards, p.SocketPath)
+				}
+				s.forwardsMu.Unlock()
+			}
+			req.Reply(true, nil)
 		case "cancel-tcpip-forward":
 			var p tcpipForwardRequest
 			if ssh.Unmarshal(req.Payload, &p) == nil {
@@ -192,6 +209,51 @@ func (s *testSSHServer) forwardAcceptLoop(conn *ssh.ServerConn, l net.Listener, 
 	}
 }
 
+// handleStreamLocalForward 模拟 sshd 的 streamlocal-forward@openssh.com:
+// 在 VPS(本机)上监听 unix socket,每条连接经 forwarded-streamlocal 通道交给客户端。
+func (s *testSSHServer) handleStreamLocalForward(conn *ssh.ServerConn, req *ssh.Request) {
+	var p struct{ SocketPath string }
+	if ssh.Unmarshal(req.Payload, &p) != nil {
+		req.Reply(false, nil)
+		return
+	}
+	if s.BindUnlink {
+		os.Remove(p.SocketPath)
+	}
+	l, err := net.Listen("unix", p.SocketPath)
+	if err != nil {
+		req.Reply(false, nil)
+		return
+	}
+	s.forwardsMu.Lock()
+	if s.unixForwards == nil {
+		s.unixForwards = make(map[string]net.Listener)
+	}
+	s.unixForwards[p.SocketPath] = l
+	s.forwardsMu.Unlock()
+	req.Reply(true, nil)
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				ch, reqs, err := conn.OpenChannel("forwarded-streamlocal@openssh.com",
+					ssh.Marshal(struct{ SocketPath, Reserved0 string }{p.SocketPath, ""}))
+				if err != nil {
+					return
+				}
+				go ssh.DiscardRequests(reqs)
+				go io.Copy(ch, c)
+				io.Copy(c, ch)
+				ch.Close()
+			}()
+		}
+	}()
+}
+
 type directTCPIPPayload struct {
 	DestAddr   string
 	DestPort   uint32
@@ -205,16 +267,30 @@ func (s *testSSHServer) handleChannel(conn *ssh.ServerConn, ch ssh.NewChannel) {
 		go s.handleSession(ch)
 		return
 	}
-	if ch.ChannelType() != "direct-tcpip" {
+	var target net.Conn
+	var err error
+	switch ch.ChannelType() {
+	case "direct-tcpip":
+		var p directTCPIPPayload
+		if ssh.Unmarshal(ch.ExtraData(), &p) != nil {
+			ch.Reject(ssh.ConnectionFailed, "bad payload")
+			return
+		}
+		target, err = net.Dial("tcp", net.JoinHostPort(p.DestAddr, fmt.Sprint(p.DestPort)))
+	case "direct-streamlocal@openssh.com":
+		var p struct {
+			SocketPath, Reserved0 string
+			Reserved1             uint32
+		}
+		if ssh.Unmarshal(ch.ExtraData(), &p) != nil {
+			ch.Reject(ssh.ConnectionFailed, "bad payload")
+			return
+		}
+		target, err = net.Dial("unix", p.SocketPath)
+	default:
 		ch.Reject(ssh.UnknownChannelType, "unsupported")
 		return
 	}
-	var p directTCPIPPayload
-	if ssh.Unmarshal(ch.ExtraData(), &p) != nil {
-		ch.Reject(ssh.ConnectionFailed, "bad payload")
-		return
-	}
-	target, err := net.Dial("tcp", net.JoinHostPort(p.DestAddr, fmt.Sprint(p.DestPort)))
 	if err != nil {
 		ch.Reject(ssh.ConnectionFailed, err.Error())
 		return

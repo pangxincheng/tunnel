@@ -61,24 +61,7 @@ func ReverseForward(remoteAddr string, localAddr string, opts ...ForwardOption) 
 			}
 			return nil, fmt.Errorf("请求远程转发 %s: %w", remoteAddr, err)
 		}
-		go func() {
-			for {
-				remote, err := l.Accept()
-				if err != nil {
-					return // 监听器随连接断开失效,重连由监督循环负责
-				}
-				go func() {
-					fc.logger.Debug("收到反向连接", "remote", remoteAddrString(remote))
-					local, err := net.DialTimeout("tcp", localAddr, 5*time.Second)
-					if err != nil {
-						fc.logger.Warn("连接内网目标失败", "target", localAddr, "err", err)
-						remote.Close()
-						return
-					}
-					proxyBidirectional(remote, local)
-				}()
-			}
-		}()
+		go serve(l, dialInner(localAddr), fc.logger, "收到反向连接", "连接内网目标失败", "target", localAddr)
 		return l, nil
 	}
 }
@@ -98,26 +81,88 @@ func LocalForward(localAddr string, remoteAddr string, opts ...ForwardOption) fu
 		if err != nil {
 			return nil, &LocalListenError{Addr: localAddr, Cause: err}
 		}
-		go func() {
-			for {
-				local, err := listener.Accept()
-				if err != nil {
-					return
-				}
-				go func() {
-					fc.logger.Debug("收到本机连接", "remote", remoteAddrString(local))
-					// Dial 在 SSH 连接上开 direct-tcpip 通道,由 sshd 代连 remoteAddr
-					remote, err := sc.Dial("tcp", remoteAddr)
-					if err != nil {
-						fc.logger.Warn("经 SSH 连接目标失败", "target", remoteAddr, "err", err)
-						local.Close() // 快速失败,不挂起调用方
-						return
-					}
-					proxyBidirectional(local, remote)
-				}()
-			}
-		}()
+		// Dial 在 SSH 连接上开 direct-tcpip 通道,由 sshd 代连 remoteAddr
+		dial := func() (net.Conn, error) { return sc.Dial("tcp", remoteAddr) }
+		go serve(listener, dial, fc.logger, "收到本机连接", "经 SSH 连接目标失败", "target", remoteAddr)
 		return listener, nil
+	}
+}
+
+// ReverseForwardUnix 返回按名字反向转发(server 方向)的 establish 闭包:
+// 每次连接后解析 VPS 上的 <dir>/<name>.sock(dir 为空时经 exec 解析
+// $HOME/.tunnel/sockets),请求 sshd 在该 socket 上监听
+// (streamlocal-forward@openssh.com),每条连接代理到 localAddr。
+// 重连时旧 socket 残留由 VPS sshd 的 StreamLocalBindUnlink 替换。
+//
+//	c := tunnel.NewClient(cfg, tunnel.ReverseForwardUnix("", "nas", "127.0.0.1:22"))
+func ReverseForwardUnix(dir, name, localAddr string, opts ...ForwardOption) func(*ssh.Client) (net.Listener, error) {
+	fc := newForwardConfig(opts)
+	return func(sc *ssh.Client) (net.Listener, error) {
+		sock, err := ResolveSocketPath(sc, dir, name)
+		if err != nil {
+			return nil, err
+		}
+		l, err := sc.Listen("unix", sock)
+		if err != nil {
+			if strings.Contains(err.Error(), "streamlocal-forward@openssh.com request denied by peer") {
+				return nil, &RemoteSocketListenError{Path: sock, Cause: err}
+			}
+			return nil, fmt.Errorf("请求远程 socket 转发 %s: %w", sock, err)
+		}
+		go serve(l, dialInner(localAddr), fc.logger, "收到反向连接", "连接内网目标失败", "target", localAddr)
+		return l, nil
+	}
+}
+
+// LocalForwardUnix 返回按名字正向转发(client 方向)的 establish 闭包:
+// 本机 localAddr 监听,每条连接经 direct-streamlocal@openssh.com 通道
+// 连到 VPS 上 name 对应的 socket。
+//
+//	c := tunnel.NewClient(cfg, tunnel.LocalForwardUnix("127.0.0.1:5102", "", "nas"))
+func LocalForwardUnix(localAddr, dir, name string, opts ...ForwardOption) func(*ssh.Client) (net.Listener, error) {
+	fc := newForwardConfig(opts)
+	return func(sc *ssh.Client) (net.Listener, error) {
+		sock, err := ResolveSocketPath(sc, dir, name)
+		if err != nil {
+			return nil, err
+		}
+		listener, err := net.Listen("tcp", localAddr)
+		if err != nil {
+			return nil, &LocalListenError{Addr: localAddr, Cause: err}
+		}
+		dial := func() (net.Conn, error) { return sc.Dial("unix", sock) }
+		go serve(listener, dial, fc.logger, "收到本机连接", "经 SSH 连接目标失败", "name", name, "target", sock)
+		return listener, nil
+	}
+}
+
+// dialInner 返回连接内网目标的拨号函数(反向转发的落点)。
+func dialInner(addr string) func() (net.Conn, error) {
+	return func() (net.Conn, error) { return net.DialTimeout("tcp", addr, 5*time.Second) }
+}
+
+// serve 是全部转发工厂共用的 accept/代理循环:每条接入连接调用 dial
+// 连到另一端并双向转发;拨号失败记 Warn 并立即关闭接入连接(快速失败,
+// 不挂起调用方)。监听器随 SSH 连接断开失效时退出,重连由监督循环负责。
+// logAttrs 附加在拨号失败日志上(如 target、name)。
+func serve(l net.Listener, dial func() (net.Conn, error), logger *slog.Logger, acceptMsg, failMsg string, logAttrs ...any) {
+	for {
+		in, err := l.Accept()
+		if err != nil {
+			return
+		}
+		go func() {
+			logger.Debug(acceptMsg, "remote", remoteAddrString(in))
+			out, err := dial()
+			if err != nil {
+				// 复制后再追加:多个协程共享 logAttrs,原地 append 可能竞争底层数组
+				attrs := append(append([]any(nil), logAttrs...), "err", err)
+				logger.Warn(failMsg, attrs...)
+				in.Close()
+				return
+			}
+			proxyBidirectional(in, out)
+		}()
 	}
 }
 
