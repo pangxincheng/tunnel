@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-22(tunnel-app 支持)
+
+- 新增实现计划 `docs/superpowers/plans/2026-11-22-core-for-tunnel-app.md`:为 tunnel-app 一期提供设备信息文件与设备列表、多转发 Session、可暂停/重试的 Share 运行时、本机控制通道、`tunnel install/uninstall/status/pause/resume/retry`。
+
 ## 2026-11-22(按名字转发)
 
 - 新增 `ValidateName` / `ResolveSocketPath`(`tunnel/socket.go`):校验服务名(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`),并解析 VPS 上的 socket 路径 `<dir>/<name>.sock`;未指定目录时经 SSH exec 执行 `mkdir -p -m 700 "$HOME/.tunnel/sockets"` 自动创建并取回绝对路径,路径超过 103 字节报不可恢复错误。
