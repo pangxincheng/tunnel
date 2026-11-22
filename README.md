@@ -135,6 +135,7 @@ TOML 中写 `name = "nas"`。`name` 与 `remote_listen_port` 只能二选一;同
 
 注意:
 
+- **server 与 client 必须用同一个 VPS 账户登录,且 `remote_socket_dir` 配置一致**(都不写,或写成同一路径)。每一端解析的都是自己账户的 `$HOME/.tunnel/sockets`,socket 目录的权限是 700,其他账户无法访问。两边不一致时,client 的每次连接都会失败,表现和"server 不在线"一样。排查时对照 server 的「隧道就绪」日志和 client 的「VPS socket 已解析」日志,看两边路径是否相同。
 - **名字需全局唯一**:两台机器用同一个名字时,后连上的一台会顶替前一台。
 - **socket 目录**:默认每次连接后在 VPS 上执行 `mkdir -p -m 700 "$HOME/.tunnel/sockets"`,自动创建并解析目录。如果 tunnel 账户不允许执行命令(shell 为 nologin 或设置了 ForceCommand),请配置 `remote_socket_dir`(`--remote-socket-dir`,绝对路径),并在 VPS 上预先创建该目录、`chmod 700`。
 - 目录权限为 700,只有 tunnel 账户能连接这些 socket。这比 loopback 端口(VPS 上任何本地用户都能连)更收紧。

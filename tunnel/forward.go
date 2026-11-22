@@ -126,6 +126,9 @@ func LocalForwardUnix(localAddr, dir, name string, opts ...ForwardOption) func(*
 		if err != nil {
 			return nil, err
 		}
+		// 记录实际路径:server 与 client 账户或 remote_socket_dir 不一致时,
+		// 对照 server「隧道就绪」日志即可发现两边路径不同
+		fc.logger.Info("VPS socket 已解析", "name", name, "path", sock)
 		listener, err := net.Listen("tcp", localAddr)
 		if err != nil {
 			return nil, &LocalListenError{Addr: localAddr, Cause: err}

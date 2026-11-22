@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -104,5 +105,32 @@ func TestResolveSocketPathTooLong(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "103") {
 		t.Fatalf("缺少长度上限提示: %v", err)
+	}
+}
+
+// TestResolveSocketPathExecTimeout:远程命令永不退出(如 ForceCommand 阻塞)时,
+// 必须在超时后返回不可恢复错误,而不是让守护进程无日志地永久挂起。
+func TestResolveSocketPathExecTimeout(t *testing.T) {
+	server, client := dialTestServer(t)
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	server.ExecOutput = func(string) (string, uint32) { <-release; return "", 0 }
+	old := execTimeout
+	execTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { execTimeout = old })
+
+	done := make(chan error, 1)
+	go func() { _, err := ResolveSocketPath(client, "", "nas"); done <- err }()
+	select {
+	case err := <-done:
+		var sde *SocketDirError
+		if !IsPermanent(err) || !errors.As(err, &sde) {
+			t.Fatalf("超时应为不可恢复的 SocketDirError: %v", err)
+		}
+		if !strings.Contains(err.Error(), "超时") || !strings.Contains(err.Error(), "remote_socket_dir") {
+			t.Fatalf("缺少超时与配置提示: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("远程命令阻塞时 ResolveSocketPath 未在超时内返回")
 	}
 }

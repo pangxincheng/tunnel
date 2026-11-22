@@ -9,6 +9,8 @@
 - 四个转发工厂改为共用同一个 accept/代理循环(行为与日志文案不变);client 侧拨号失败日志附带名字。
 - CLI 新增 `--name NAME` / `--remote-socket-dir DIR`(TOML `name` / `remote_socket_dir`):`--name` 与 `--remote-listen-port` 二选一,同一来源两者都给报错,flag 优先于 TOML;名字模式下 client 必须给 `--local-ssh-port`;启动日志打印 `name` 与 `vps_socket`。
 - README 新增「按名字转发(推荐)」一节,并在准备步骤中加入 sshd 的 `StreamLocalBindUnlink yes` 配置;`tunnel.toml.example` 补充 `name` / `remote_socket_dir` 示例。
+- socket 目录解析命令限时 15 秒:远程命令不退出(ForceCommand 阻塞、NFS 家目录卡住等)时报不可恢复错误并提示配置 `remote_socket_dir`,不再无日志地永久挂起。
+- client 名字模式在解析出 VPS socket 路径后以 INFO 记录「VPS socket 已解析」;README 注明 server 与 client 必须使用同一 VPS 账户且 `remote_socket_dir` 一致。
 - 测试 SSH 服务器支持 session/exec 与 streamlocal 转发;新增实现计划 `docs/superpowers/plans/2026-11-22-name-forwarding.md`。
 
 ## 2026-11-22(按名字转发设计)

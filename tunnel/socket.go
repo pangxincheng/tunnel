@@ -6,6 +6,8 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -20,6 +22,11 @@ const DefaultSocketDirCommand = `mkdir -p -m 700 "$HOME/.tunnel/sockets" && cd "
 // maxSocketPathLen 是 socket 完整路径的长度上限:sun_path 在 macOS 上为
 // 104 字节(含结尾 NUL),Linux 为 108,取保守值。
 const maxSocketPathLen = 103
+
+// execTimeout 限制目录解析命令的执行时长:ForceCommand 阻塞、rc 文件卡住、
+// NFS 家目录停滞等情况下命令永不退出,而此时 keepalive 尚未启动,
+// 没有超时守护进程会无日志地永久挂起。测试可缩短。
+var execTimeout = 15 * time.Second
 
 var nameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
@@ -65,7 +72,16 @@ func remoteSocketDir(sc *ssh.Client) (string, error) {
 		return "", fmt.Errorf("打开 SSH 会话: %w", err)
 	}
 	defer session.Close()
+	var timedOut atomic.Bool
+	timer := time.AfterFunc(execTimeout, func() {
+		timedOut.Store(true)
+		session.Close() // 使阻塞中的 Output 返回
+	})
 	out, err := session.Output(DefaultSocketDirCommand)
+	timer.Stop()
+	if timedOut.Load() {
+		return "", &SocketDirError{Cause: fmt.Errorf("命令执行超时(%v 内未结束)", execTimeout)}
+	}
 	if err != nil {
 		var ee *ssh.ExitError
 		if errors.As(err, &ee) || strings.HasPrefix(err.Error(), "ssh: command ") {

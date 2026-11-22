@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -281,4 +283,39 @@ func TestLocalForwardUnixTargetOffline(t *testing.T) {
 	if _, err := conn.Read(make([]byte, 1)); err != io.EOF {
 		t.Fatalf("应收到 EOF(连接被关闭),got %v", err)
 	}
+}
+
+// TestLocalForwardUnixLogsResolvedPath:client 解析出的 socket 路径须以 Info 记录,
+// 便于对照 server 的「隧道就绪」路径排查账户/目录不一致。
+func TestLocalForwardUnixLogsResolvedPath(t *testing.T) {
+	server, client := dialTestServer(t)
+	var buf syncBuffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	l, err := LocalForwardUnix("127.0.0.1:0", "", "nas", WithForwardLogger(logger))(client)
+	if err != nil {
+		t.Fatalf("LocalForwardUnix: %v", err)
+	}
+	defer l.Close()
+	want := server.Home + "/.tunnel/sockets/nas.sock"
+	if !strings.Contains(buf.String(), want) || !strings.Contains(buf.String(), "level=INFO") {
+		t.Fatalf("日志缺少解析后的 socket 路径 %q:\n%s", want, buf.String())
+	}
+}
+
+// syncBuffer 是并发安全的日志缓冲。
+type syncBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }
