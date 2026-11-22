@@ -163,6 +163,18 @@ func readRemoteFile(c *sftp.Client, p string) ([]byte, error) {
 // RemoveDeviceInfo 仅当 dir/<name>.json 存在且其 device_id 等于 deviceID 时删除;
 // 文件不存在不算错误。
 func RemoveDeviceInfo(sc *ssh.Client, dir, name, deviceID string) error {
+	return removeOwned(sc, dir, name, deviceID, false)
+}
+
+// RemoveDevice 清理本机在 VPS 上留下的设备:仅当 dir/<name>.json 存在且其
+// device_id 等于 deviceID 时,删除该 json 以及 dir/<name>.sock(真实 sshd
+// 撤销转发或断线时不会删除 socket 文件)。json 不存在、损坏或属于其他设备时
+// 什么都不删(无法确认 socket 归属);文件不存在不算错误。
+func RemoveDevice(sc *ssh.Client, dir, name, deviceID string) error {
+	return removeOwned(sc, dir, name, deviceID, true)
+}
+
+func removeOwned(sc *ssh.Client, dir, name, deviceID string, withSocket bool) error {
 	if err := ValidateName(name); err != nil {
 		return err
 	}
@@ -182,6 +194,13 @@ func RemoveDeviceInfo(sc *ssh.Client, dir, name, deviceID string) error {
 	var info DeviceInfo
 	if json.Unmarshal(data, &info) != nil || info.DeviceID != deviceID {
 		return nil
+	}
+	if withSocket {
+		// 先删 socket:若删 json 后失败,下次已无法确认归属
+		sock := path.Join(dir, name+sockSuffix)
+		if err := c.Remove(sock); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("删除 socket %s: %w", sock, err)
+		}
 	}
 	if err := c.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("删除设备信息 %s: %w", p, err)

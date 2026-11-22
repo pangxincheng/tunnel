@@ -136,3 +136,57 @@ func TestResolveSocketDirSFTPTransientFailure(t *testing.T) {
 		t.Fatalf("瞬时失败不应为不可恢复错误: %v", err)
 	}
 }
+
+func TestRemoveDeviceOnlyOwn(t *testing.T) {
+	_, client := dialTestServer(t)
+	dir, err := ResolveSocketDir(client, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	touch := func(name string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exists := func(name string) bool {
+		_, err := os.Stat(filepath.Join(dir, name))
+		return err == nil
+	}
+	// 他人的:json 与 sock 都保留
+	if err := WriteDeviceInfo(client, dir, DeviceInfo{DeviceID: "other", Name: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	touch("a.sock")
+	if err := RemoveDevice(client, dir, "a", "mine"); err != nil {
+		t.Fatal(err)
+	}
+	if !exists("a.json") || !exists("a.sock") {
+		t.Fatal("他人的设备文件不应被删")
+	}
+	// 无 json(无法确认归属):sock 保留
+	touch("b.sock")
+	if err := RemoveDevice(client, dir, "b", "mine"); err != nil {
+		t.Fatal(err)
+	}
+	if !exists("b.sock") {
+		t.Fatal("无法确认归属的 socket 不应被删")
+	}
+	// 自己的:json 与 sock 都删除;sock 不存在也不报错
+	if err := WriteDeviceInfo(client, dir, DeviceInfo{DeviceID: "mine", Name: "c"}); err != nil {
+		t.Fatal(err)
+	}
+	touch("c.sock")
+	if err := RemoveDevice(client, dir, "c", "mine"); err != nil {
+		t.Fatal(err)
+	}
+	if exists("c.json") || exists("c.sock") {
+		t.Fatal("自己的设备文件应被删")
+	}
+	if err := WriteDeviceInfo(client, dir, DeviceInfo{DeviceID: "mine", Name: "d"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveDevice(client, dir, "d", "mine"); err != nil || exists("d.json") {
+		t.Fatalf("无 sock 时应只删 json: err=%v", err)
+	}
+}

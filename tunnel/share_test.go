@@ -426,3 +426,40 @@ func TestNewShareValidates(t *testing.T) {
 		t.Fatalf("Status = %+v", st)
 	}
 }
+
+// 旧名字残留的 socket(真实 sshd 撤销转发时不删除 socket 文件)在改名后应被删除。
+func TestShareSetNameRemovesStaleOldSocket(t *testing.T) {
+	e := newShareEnv(t)
+	if err := os.MkdirAll(filepath.Dir(e.statePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(e.statePath, []byte(`{"paused":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mine, _ := json.Marshal(DeviceInfo{DeviceID: testDeviceID, Name: "nas"})
+	if err := os.WriteFile(e.info("nas"), mine, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(e.sock("nas"), nil, 0o600); err != nil { // 残留的旧 socket
+		t.Fatal(err)
+	}
+	s := e.newShare(t, "nas")
+	runShare(t, s)
+	waitSharePhase(t, s, PhasePaused)
+	if err := s.SetName("nas2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Resume(); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 3*time.Second, func() bool {
+		_, ok := e.readInfo(t, "nas2")
+		return s.Status().Phase == PhaseReady && ok
+	})
+	if _, err := os.Stat(e.info("nas")); !os.IsNotExist(err) {
+		t.Fatalf("nas.json 应被删除: %v", err)
+	}
+	if _, err := os.Stat(e.sock("nas")); !os.IsNotExist(err) {
+		t.Fatalf("残留的 nas.sock 应被删除: %v", err)
+	}
+}

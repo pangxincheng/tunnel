@@ -247,7 +247,7 @@ func (s *Share) setPaused(paused bool) error {
 func (s *Share) Retry() { s.sv.RetryNow() }
 
 // SetName 改用新名字共享:断开当前连接,下次连上后删除旧名字的本机信息
-// 文件(仅当仍属于本机),再以新名字重连。暂停中只改名字,恢复后生效。
+// 文件与残留 socket(仅当信息文件仍属于本机),再以新名字重连。暂停中只改名字,恢复后生效。
 // 持久化由调用方负责。
 func (s *Share) SetName(name string) error {
 	if err := ValidateName(name); err != nil {
@@ -378,8 +378,8 @@ func (s *Share) connectOnce(ctx context.Context, ready func()) error {
 	return waitErr
 }
 
-// removePending 删除改名前旧名字的本机信息文件(RemoveDeviceInfo 只删属于
-// 本机的);失败记警告并留到下次连接再试,不影响本次共享。
+// removePending 删除改名前旧名字的本机信息文件及残留 socket(RemoveDevice
+// 只在 json 属于本机时删除);失败记警告并留到下次连接再试,不影响本次共享。
 func (s *Share) removePending(sc *ssh.Client, dir, current string) {
 	s.mu.Lock()
 	var names []string
@@ -390,13 +390,13 @@ func (s *Share) removePending(sc *ssh.Client, dir, current string) {
 	}
 	s.mu.Unlock()
 	for _, n := range names {
-		if err := RemoveDeviceInfo(sc, dir, n, s.cfg.DeviceID); err != nil {
+		if err := RemoveDevice(sc, dir, n, s.cfg.DeviceID); err != nil {
 			s.logger.Warn("删除旧名字的设备信息失败,下次连接重试", "name", n, "err", err)
 			continue
 		}
 		s.mu.Lock()
 		delete(s.pending, n)
 		s.mu.Unlock()
-		s.logger.Info("已删除旧名字的设备信息", "name", n)
+		s.logger.Info("已删除旧名字的设备信息与 socket", "name", n)
 	}
 }
