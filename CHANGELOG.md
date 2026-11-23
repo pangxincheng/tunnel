@@ -2,7 +2,7 @@
 
 ## 2026-11-23
 
-- tunnel-app 一期设计文档已同步:§6.4 / §9 服务名改为 `tunnel-<profile>`,并补充 `--for-user`、`status --json` 的 `mode` 与退出码 3 / 4、`set-name`(原 [pending] 已完成)。
+- tunnel-app 一期设计文档已同步:§6.4 / §9 服务名改为 `tunnel-<profile>`,并补充 `--for-user`、`status --json` 的 `mode` 与退出码 3 / 4、`set-name`(原待办项已完成)。
 - `tunnel status --json` 运行中的输出在 `ShareStatus` 全部字段之外加 `"mode":"user"|"system"`;已安装但未运行时(退出码 3)`--json` 只输出 `{"installed":true,"running":false,"mode":"<mode>"}`;新增退出码 4 = 未安装(`--json` 输出 `{"installed":false}`),原先未安装为退出码 1(供 tunnel-app 判断安装 / 运行状态)。
 - 新增 `tunnel set-name NAME [--mode=MODE] [--profile=P]`:经控制通道发 `set-name` 不重装改设备名字,成功 0;名字不合法或被占用(`NameTakenError` 的信息输出到 stderr)退出码 1。
 - 不给 `--profile` 时自动选择:扫描 user / system 两种模式下已安装的 `tunnel-*` 服务,只有一个就选它,没有则按未安装处理,多个则报「已安装多个服务(…),请用 --profile 指定」(同一 profile 在两种模式都有时仍提示用 `--mode`);`resolveTarget` 找不到服务时返回哨兵错误 `errNotInstalled`。此前不给 `--profile` 固定取 `default`。
