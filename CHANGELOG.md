@@ -1,6 +1,7 @@
 # CHANGELOG
 
 ## 2026-11-23
+- 新增 `desktop/internal/sshd`:`Detect(ctx, goos, readConfig)` 检测本机 sshd。候选端口为配置中按出现顺序去重的 `Port N`(关键字大小写不敏感,忽略 `#` 注释、缩进与非法数值,不跟随 `Include`),再补 22;逐个以 1 秒超时(受 ctx 约束)连接 `127.0.0.1:<port>`,读到 `SSH-` 开头的握手即视为 sshd,返回第一个命中端口。`DefaultConfigReader(goos)` 给出 macOS / Linux 的 `/etc/ssh/sshd_config` 与 Windows 的 `%ProgramData%\ssh\sshd_config` 读取函数;包级变量 `dial` 供测试替换,测试对 22 端口打桩,不依赖本机是否开启远程登录。
 - 修复 `internal/sharesvc`:Windows 下 `ExecRunner` 设置 `HideWindow` 与 `CREATE_NO_WINDOW`,轮询 `status` 不再闪控制台窗口;ctx 取消时返回 ctx 错误而非 `exit status -1`;所有方法先用 `tunnel.ValidateName` 校验 profile / 设备名(如 `-h`、`../x` 不会进入 CLI 参数),系统模式要求非空 currentUser;osascript 取消标记改为精确匹配 `(-128)`。
 - 新增 `desktop/internal/sharesvc`:通过附带的 tunnel CLI 子进程控制共享服务。`Status`(解析 `status --json`,退出码 0/3/4 对应运行中/已安装未运行/未安装)、`Install` / `Uninstall` / `Pause` / `Resume` / `Retry` / `SetName`(均显式带 `--profile`),`LogPath` 给出各系统日志位置。系统模式安装/卸载经提权:macOS 用 `osascript ... with administrator privileges`(逐参数 shell 单引号转义后再转义为 AppleScript 字符串),Linux 用 `pkexec`,stderr 含 `-128` 或退出码 126/127 返回 `ErrCancelled`,Windows 返回不支持错误。`ExecRunner` 在运行后即删除的空临时目录中执行 CLI,避免读到 `./tunnel.toml`;CLI 失败时错误信息取 stderr 里 `err="..."` 的值。测试只用假 Runner。
 - 修复 `internal/probe`:握手成功后仍保持 ctx/10 秒超时守卫,服务器认证后不应答 exec 时 `Test` 不再无限阻塞,ctx 取消或超时返回 `*DialError`(新增测试 `TestProbeStalledExec`);去掉无效的 `ClientConfig.Timeout`,测试改用 `t.TempDir()`。
