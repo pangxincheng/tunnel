@@ -12,6 +12,7 @@ import {
   type ServerView,
 } from '../api'
 import { t } from '../i18n'
+import { actionError } from '../format'
 import { useCopy } from '../clipboard'
 import Dialog from './Dialog'
 
@@ -164,7 +165,7 @@ export default function ServerDialog({ servers, editing, onClose }: Props) {
       }
       onClose()
     } catch (e) {
-      setSaveErr(errorMessage(e))
+      setSaveErr(actionError(e))
       setSaving(false)
     }
   }

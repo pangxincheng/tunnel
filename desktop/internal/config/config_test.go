@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -168,5 +169,35 @@ func TestCheckPort(t *testing.T) {
 	}
 	if c.CheckPort("a", "d9", 5102) == nil {
 		t.Fatal("other device in same server conflicts")
+	}
+}
+
+func TestCheckPortErrors(t *testing.T) {
+	c := &Config{Servers: []Server{{Name: "a", Forwards: map[string]Forward{"d1": {Port: 5102}}}}}
+	if err := c.CheckPort("a", "d2", 80); !errors.Is(err, ErrPortRange) {
+		t.Fatalf("range: %v", err)
+	}
+	if err := c.CheckPort("a", "d2", 5102); !errors.Is(err, ErrPortConflict) {
+		t.Fatalf("conflict: %v", err)
+	}
+}
+
+func TestExpandHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip(err)
+	}
+	cases := map[string]string{
+		"~/.ssh/id": filepath.Join(home, ".ssh", "id"),
+		"~":         home,
+		"/abs/id":   "/abs/id",
+		"rel/~/id":  "rel/~/id",
+		"~other/id": "~other/id",
+		"":          "",
+	}
+	for in, want := range cases {
+		if got := ExpandHome(in); got != want {
+			t.Errorf("ExpandHome(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

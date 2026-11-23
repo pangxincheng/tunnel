@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/pangxincheng/tunnel/tunnel"
@@ -34,6 +35,10 @@ type ShareIntent struct {
 	On     bool   `json:"on"`
 	Name   string `json:"name"`
 	System bool   `json:"system"`
+	// Decided is set once the user turned sharing on or off here (or the app
+	// adopted an already running service); until then a running service
+	// found on this server is adopted instead of paused.
+	Decided bool `json:"decided,omitempty"`
 }
 
 type Forward struct {
@@ -57,6 +62,19 @@ type Config struct {
 
 func defaults() *Config {
 	return &Config{Settings: Settings{Mode: "system", Accent: "green", Lang: "system", RestoreForwards: true}}
+}
+
+// ExpandHome expands a leading "~" or "~/" in p to the user's home
+// directory; other paths (and "~user/...") are returned unchanged.
+func ExpandHome(p string) string {
+	if p != "~" && !strings.HasPrefix(p, "~/") && !strings.HasPrefix(p, `~`+string(filepath.Separator)) {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return p
+	}
+	return filepath.Join(home, p[1:])
 }
 
 // DefaultPath returns os.UserConfigDir()/tunnel-app/config.json.

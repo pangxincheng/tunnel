@@ -1,24 +1,31 @@
+import { useState } from 'react'
 import { Retry, SetConnected, type ServerView } from '../api'
 import { t } from '../i18n'
-import { since } from '../format'
+import { actionError, since } from '../format'
 import { useNow } from '../useNow'
 import Countdown from './Countdown'
 
 /** Status banner for a server that is unreachable or disconnected; nothing otherwise. */
 export default function Banner({ server }: { server: ServerView }) {
   const now = useNow()
+  const [connectErr, setConnectErr] = useState('')
   if (server.conn === 'disconnected') {
+    const connect = () => {
+      setConnectErr('')
+      SetConnected(server.name, true).catch((e) => setConnectErr(actionError(e)))
+    }
     return (
       <div className="banner paused" role="status">
         <span className="dot idle" />
         <div className="grow">
           <div>{t('bannerPaused', { server: server.name })}</div>
+          {connectErr && (
+            <div className="banner-err" role="alert">
+              {connectErr}
+            </div>
+          )}
         </div>
-        <button
-          type="button"
-          className="btn primary sm"
-          onClick={() => SetConnected(server.name, true).catch((e) => console.error('SetConnected failed', e))}
-        >
+        <button type="button" className="btn primary sm" onClick={connect}>
           {t('connect')}
         </button>
       </div>

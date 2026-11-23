@@ -50,6 +50,27 @@ describe('Sidebar', () => {
     expect(screen.getByText('已连接 1 在线 3')).toBeTruthy()
   })
 
+  it('share not running: red dot when sharing is on', () => {
+    const s = server()
+    s.share = { ...s.share, on: true, phase: 'not_running' }
+    const { container } = renderSidebar([s])
+    expect(container.querySelector('.dot.err')).toBeTruthy()
+    const off = server()
+    off.share = { ...off.share, on: false, phase: 'not_running' }
+    expect(renderSidebar([off]).container.querySelector('.dot.err')).toBeNull()
+  })
+
+  it('a failed connect/disconnect shows the mapped sentence in the row', async () => {
+    apiMock.SetConnected.mockRejectedValueOnce(new Error('cancelled: authorization cancelled'))
+    renderSidebar([server()])
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: '断开 home' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('已取消授权')
+    apiMock.SetConnected.mockRejectedValueOnce(new Error('disk full'))
+    await user.click(screen.getByRole('button', { name: '断开 home' }))
+    expect((await screen.findByText('disk full')).getAttribute('role')).toBe('alert')
+  })
+
   it('disconnected shows 已断开 with an idle dot', () => {
     const { container } = renderSidebar([server({ conn: 'disconnected' })])
     expect(screen.getByText('已断开')).toBeTruthy()

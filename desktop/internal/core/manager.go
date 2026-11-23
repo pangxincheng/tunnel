@@ -15,6 +15,7 @@ import (
 	"errors"
 	"log/slog"
 	"net"
+	"os"
 	"runtime"
 	"strconv"
 	"sync"
@@ -69,6 +70,7 @@ type Deps struct {
 	ShareEvery    time.Duration                                                                      // default 3s
 	TunnelVersion string                                                                             // version of the bundled tunnel CLI
 	Logger        *slog.Logger                                                                       // default slog.Default()
+	Hostname      func() (string, error)                                                             // default os.Hostname; seeds new servers' share name
 }
 
 var (
@@ -125,6 +127,9 @@ func New(d Deps) (*Manager, error) {
 	}
 	if d.Now == nil {
 		d.Now = time.Now
+	}
+	if d.Hostname == nil {
+		d.Hostname = os.Hostname
 	}
 	if d.RefreshEvery <= 0 {
 		d.RefreshEvery = 30 * time.Second
@@ -204,6 +209,10 @@ func (m *Manager) Start(ctx context.Context) {
 	})
 	m.notify()
 }
+
+// Wait blocks until every background goroutine has returned after the
+// Start context was cancelled, including the final config save.
+func (m *Manager) Wait() { m.wg.Wait() }
 
 func (m *Manager) goBackground(f func()) {
 	m.wg.Add(1)

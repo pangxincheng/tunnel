@@ -11,6 +11,9 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
+// singleInstanceID identifies the app for Wails' single-instance lock.
+const singleInstanceID = "com.pangxincheng.tunnel-app"
+
 //go:embed all:frontend/dist
 var assets embed.FS
 
@@ -27,6 +30,7 @@ func main() {
 	svc := newAppService(mgr)
 
 	var quitting atomic.Bool
+	var showWindow atomic.Pointer[func()] // set once the window exists
 	app := application.New(application.Options{
 		Name:        "Tunnel",
 		Description: "Manage tunnel forwards and share this computer",
@@ -39,6 +43,16 @@ func main() {
 			ApplicationShouldTerminateAfterLastWindowClosed: false,
 		},
 		ShouldQuit: func() bool { quitting.Store(true); return true },
+		// A second launch (e.g. from the app menu while the window is hidden in
+		// the tray) exits and brings this instance's window forward instead.
+		SingleInstance: &application.SingleInstanceOptions{
+			UniqueID: singleInstanceID,
+			OnSecondInstanceLaunch: func(application.SecondInstanceData) {
+				if f := showWindow.Load(); f != nil {
+					(*f)()
+				}
+			},
+		},
 	})
 
 	appPtr.Store(app)
@@ -67,6 +81,7 @@ func main() {
 		// refresh explicitly whenever the window is brought back.
 		svc.refreshSelected()
 	}
+	showWindow.Store(&show)
 	quit := func() { quitting.Store(true); app.Quit() }
 	svc.quit = quit
 	app.Menu.Set(appMenu(app, quit))

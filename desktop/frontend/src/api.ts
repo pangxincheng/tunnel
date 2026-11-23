@@ -38,7 +38,7 @@ export function onState(cb: (s: AppState) => void): () => void {
 }
 
 const CODES = [
-  'offline', 'no_sshd', 'name_taken', 'cancelled', 'port_busy', 'port_invalid', 'port_conflict', 'unknown',
+  'offline', 'no_sshd', 'name_taken', 'cancelled', 'not_running', 'port_busy', 'port_invalid', 'port_conflict', 'unknown',
   'passphrase', 'auth', 'dial', 'socketdir', 'autostart', 'journal', 'nolog',
 ]
 

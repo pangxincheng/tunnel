@@ -9,12 +9,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pangxincheng/tunnel-app/desktop/internal/config"
 	"github.com/pangxincheng/tunnel-app/desktop/internal/core"
 	"github.com/pangxincheng/tunnel-app/desktop/internal/probe"
 	"github.com/pangxincheng/tunnel-app/desktop/internal/sharesvc"
 	"github.com/pangxincheng/tunnel/tunnel"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 func TestProbeErrorCodes(t *testing.T) {
@@ -31,6 +33,9 @@ func TestProbeErrorCodes(t *testing.T) {
 		{core.ErrNoSSHD, "no_sshd"},
 		{core.ErrNameTaken, "name_taken"},
 		{sharesvc.ErrCancelled, "cancelled"},
+		{fmt.Errorf("tunnel retry: %w", sharesvc.ErrNotRunning), "not_running"},
+		{fmt.Errorf("端口须在 1024–65535 之间: %w", config.ErrPortRange), "port_invalid"},
+		{fmt.Errorf("端口 5102 已分配给其他设备: %w", config.ErrPortConflict), "port_conflict"},
 		{&tunnel.LocalListenError{Addr: "127.0.0.1:1", Cause: errors.New("in use")}, "port_busy"},
 		{core.ErrUnknownServer, "unknown"},
 		{core.ErrUnknownDevice, "unknown"},
@@ -216,5 +221,30 @@ func TestQuitCallsHookAndTemplateIconIsPNG(t *testing.T) {
 	}
 	if b := templateIcon(); len(b) < 8 || string(b[1:4]) != "PNG" {
 		t.Error("template icon is not a PNG")
+	}
+}
+
+func TestWaitTimeout(t *testing.T) {
+	if !waitTimeout(func() {}, time.Second) {
+		t.Fatal("quick wait reported timeout")
+	}
+	block := make(chan struct{})
+	defer close(block)
+	if waitTimeout(func() { <-block }, 20*time.Millisecond) {
+		t.Fatal("blocked wait reported done")
+	}
+}
+
+func TestServiceShutdownWaitsForManager(t *testing.T) {
+	s, _ := newTestService(t)
+	if err := s.ServiceStartup(context.Background(), application.ServiceOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ServiceShutdown(); err != nil {
+		t.Fatal(err)
+	}
+	// every background goroutine (including the final save) has returned
+	if !waitTimeout(s.mgr.Wait, 100*time.Millisecond) {
+		t.Fatal("manager still running after ServiceShutdown")
 	}
 }

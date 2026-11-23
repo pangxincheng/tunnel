@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import { SetConnected, Select, type AppState, type ServerView } from '../api'
+import { actionError } from '../format'
 import { t } from '../i18n'
 import { EditIcon, GearIcon, PlusIcon, PowerIcon, TrashIcon } from './icons'
 
@@ -15,7 +17,7 @@ type Dot = 'on' | 'err' | 'idle'
 function rowStatus(s: ServerView): { dot: Dot; unreachable: boolean } {
   if (s.conn === 'disconnected') return { dot: 'idle', unreachable: false }
   if (s.conn === 'waiting' || s.conn === 'failed') return { dot: 'err', unreachable: true }
-  if (s.share.on && s.share.phase === 'failed') return { dot: 'err', unreachable: false }
+  if (s.share.on && (s.share.phase === 'failed' || s.share.phase === 'not_running')) return { dot: 'err', unreachable: false }
   if (s.conn === 'connecting') return { dot: 'idle', unreachable: false }
   return { dot: 'on', unreachable: false }
 }
@@ -26,6 +28,12 @@ function report(e: unknown) {
 
 export default function Sidebar({ state, onAdd, onEdit, onDelete, onSettings }: Props) {
   const servers = state.servers ?? []
+  // last failed connect/disconnect, shown under that server's row
+  const [actErr, setActErr] = useState<{ server: string; text: string } | null>(null)
+  const toggleConnected = (name: string, on: boolean) => {
+    setActErr(null)
+    SetConnected(name, on).catch((e) => setActErr({ server: name, text: actionError(e) }))
+  }
   return (
     <aside className="sidebar">
       {state.platform === 'darwin' && <div className="side-top" />}
@@ -55,6 +63,11 @@ export default function Sidebar({ state, onAdd, onEdit, onDelete, onSettings }: 
                           ? t('connecting')
                           : t('serverSummary', { connected: s.connected, online: s.online })}
                   </div>
+                  {actErr?.server === s.name && (
+                    <div className="m err" role="alert">
+                      {actErr.text}
+                    </div>
+                  )}
                 </div>
               </button>
               <span className="srv-acts">
@@ -72,7 +85,7 @@ export default function Sidebar({ state, onAdd, onEdit, onDelete, onSettings }: 
                   className={disconnected ? 'sa' : 'sa on'}
                   title={toggle}
                   aria-label={`${toggle} ${s.name}`}
-                  onClick={() => SetConnected(s.name, disconnected).catch(report)}
+                  onClick={() => toggleConnected(s.name, disconnected)}
                 >
                   <PowerIcon />
                 </button>

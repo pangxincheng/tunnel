@@ -46,7 +46,7 @@ go test ./...
 
 | 变量 | 作用 |
 |---|---|
-| `TUNNEL_APP_TUNNEL_BIN` | 指定要使用的 tunnel 可执行文件(默认用 App 旁边附带的那个) |
+| `TUNNEL_APP_TUNNEL_BIN` | 指定要使用的 tunnel 可执行文件(默认用 App 旁边附带的那个;Linux deb / rpm 装在 `/usr/lib/tunnel-app/tunnel`,不进 PATH) |
 | `TUNNEL_APP_CONFIG` | 指定配置文件路径,用于隔离的试运行(默认在用户配置目录的 `tunnel-app/` 下) |
 
 ## go.mod 的 replace

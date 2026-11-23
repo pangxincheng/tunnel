@@ -99,3 +99,38 @@ func TestTunnelPathFollowsSymlink(t *testing.T) {
 		t.Fatalf("got %q want %q", got, wantResolved)
 	}
 }
+
+func TestTunnelPathLinuxLibDir(t *testing.T) {
+	t.Setenv(EnvVar, "")
+	lib := t.TempDir()
+	oldGOOS, oldLib := goos, linuxLibDir
+	goos, linuxLibDir = "linux", lib
+	t.Cleanup(func() { goos, linuxLibDir = oldGOOS, oldLib })
+	exeDir := t.TempDir()
+	fakeExecutable(t, exeDir)
+
+	if _, err := TunnelPath(); !errors.Is(err, ErrMissing) {
+		t.Fatalf("want ErrMissing, got %v", err)
+	}
+	want := filepath.Join(lib, "tunnel")
+	if err := os.WriteFile(want, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := TunnelPath(); err != nil || got != want {
+		t.Fatalf("got %q, %v; want %q", got, err, want)
+	}
+	// the executable's own directory wins
+	beside := filepath.Join(exeDir, "tunnel")
+	if err := os.WriteFile(beside, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := TunnelPath(); err != nil || got != beside {
+		t.Fatalf("got %q, %v; want %q", got, err, beside)
+	}
+	// other systems never look in the Linux lib dir
+	goos = "darwin"
+	os.Remove(beside)
+	if _, err := TunnelPath(); !errors.Is(err, ErrMissing) {
+		t.Fatalf("darwin: want ErrMissing, got %v", err)
+	}
+}

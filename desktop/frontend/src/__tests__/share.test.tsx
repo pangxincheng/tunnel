@@ -69,6 +69,21 @@ describe('ShareSection', () => {
     expect(apiMock.OpenLog).toHaveBeenCalledWith('home')
   })
 
+  it('retry on a stopped service shows the not-running sentence', async () => {
+    apiMock.RetryShare.mockRejectedValueOnce(new Error('not_running: tunnel retry: share service is not running'))
+    share({ on: true, phase: 'failed', err: 'x' })
+    await userEvent.click(screen.getByText('重试'))
+    expect(await screen.findByText('共享服务没有在运行，请查看日志')).toBeTruthy()
+  })
+
+  it('English not-running sentence', async () => {
+    setLang('en')
+    apiMock.UpdateShare.mockRejectedValueOnce(new Error('not_running: tunnel pause: share service is not running'))
+    share({ on: true, phase: 'ready', outdated: true })
+    await userEvent.click(screen.getByRole('button', { name: /update/i }))
+    expect(await screen.findByText('The sharing service is not running. Check the log.')).toBeTruthy()
+  })
+
   it('journal log error shows the command as copyable text; nolog shows the missing-file note', async () => {
     const u = userEvent.setup()
     share({ on: true, phase: 'failed', err: 'x' })

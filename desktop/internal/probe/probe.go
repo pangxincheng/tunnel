@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pangxincheng/tunnel-app/desktop/internal/config"
 	"github.com/pangxincheng/tunnel/tunnel"
 	"golang.org/x/crypto/ssh"
 )
@@ -55,7 +56,7 @@ func (e *SocketDirError) Unwrap() error { return e.Err }
 // 仅用于展示指纹,信任须待用户确认之后。
 func Test(ctx context.Context, p Params) (Result, error) {
 	var res Result
-	keyData, err := os.ReadFile(p.KeyPath)
+	keyData, err := os.ReadFile(config.ExpandHome(p.KeyPath))
 	if err != nil {
 		return res, fmt.Errorf("read private key: %w", err)
 	}

@@ -2,6 +2,8 @@ package core
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -584,6 +586,8 @@ func TestDisconnectRetriesFailedPause(t *testing.T) {
 		e.share.installed("home", false, "mac")
 		e.share.pauseErrs = []error{errors.New("pause failed")}
 	})
+	// let the share loop see the running service first, so it doesn't pause it itself
+	e.waitView("home", "share synced", func(v ServerView) bool { return v.Share.Phase == "ready" })
 	if err := e.m.SetConnected("home", false); err == nil {
 		t.Fatal("expected pause error")
 	}
@@ -732,5 +736,230 @@ func TestUpdateServerRejectsBadHostKey(t *testing.T) {
 	}
 	if got := e.cfgServer("home").HostKey; got != validHostKey {
 		t.Fatalf("stored host key changed: %q", got)
+	}
+}
+
+// --- final review fixes ---
+
+func TestShareOffWhileNotRunning(t *testing.T) {
+	e := newEnv(t, cfgWith(withShare(srvCfg("home"), true, "mac")), func(e *env) {
+		e.share.installed("home", false, "mac")
+		e.share.setSvc("home", func(s *fakeSvc) { s.stopped = true })
+	})
+	if err := e.m.SetShare("home", false); err != nil {
+		t.Fatalf("SetShare(off) on a stopped service: %v", err)
+	}
+	if sc := e.cfgServer("home"); sc.Share.On || !sc.Share.Decided {
+		t.Fatalf("intent not persisted: %+v", sc.Share)
+	}
+	if v := e.view("home"); v.Share.On || v.Share.Phase != "not_running" {
+		t.Fatalf("%+v", v.Share)
+	}
+}
+
+func TestDisconnectWhileShareNotRunning(t *testing.T) {
+	e := newEnv(t, cfgWith(withShare(srvCfg("home"), true, "mac")), func(e *env) {
+		e.share.installed("home", false, "mac")
+		e.share.setSvc("home", func(s *fakeSvc) { s.stopped = true })
+	})
+	if err := e.m.SetConnected("home", false); err != nil {
+		t.Fatalf("SetConnected(false): %v", err)
+	}
+	if !e.cfgServer("home").Disconnected {
+		t.Fatal("not disconnected")
+	}
+}
+
+func TestShareOnWhileNotRunningKeepsIntent(t *testing.T) {
+	e := newEnv(t, cfgWith(withShare(srvCfg("home"), false, "mac")), func(e *env) {
+		e.share.installed("home", false, "mac")
+		e.share.setSvc("home", func(s *fakeSvc) { s.stopped = true })
+	})
+	e.ready("home")
+	if err := e.m.SetShare("home", true); err != nil {
+		t.Fatalf("SetShare(on): %v", err)
+	}
+	if !e.cfgServer("home").Share.On {
+		t.Fatal("intent not persisted")
+	}
+}
+
+func TestSyncPausesServiceBackRunningWhileOff(t *testing.T) {
+	e := newEnv(t, cfgWith(withShare(srvCfg("home"), true, "mac")), func(e *env) {
+		e.share.installed("home", false, "mac")
+		e.share.setSvc("home", func(s *fakeSvc) { s.stopped = true })
+	})
+	e.waitView("home", "not running", func(v ServerView) bool { return v.Share.Phase == "not_running" })
+	if err := e.m.SetShare("home", false); err != nil {
+		t.Fatal(err)
+	}
+	// the service manager restarts it, unpaused
+	e.share.mu.Lock()
+	e.share.pauseErrs = []error{errors.New("pause failed")}
+	e.share.mu.Unlock()
+	e.share.setSvc("home", func(s *fakeSvc) { s.stopped = false })
+	eventually(t, "pause after coming back", func() bool { return e.share.count("pause home") == 1 })
+	time.Sleep(60 * time.Millisecond) // several share ticks
+	if n := e.share.count("pause home"); n != 1 {
+		t.Fatalf("pause hammered: %d calls %v", n, e.share.Calls())
+	}
+	// next transition (stopped, then running again) re-applies once
+	e.share.setSvc("home", func(s *fakeSvc) { s.stopped = true })
+	e.waitView("home", "not running", func(v ServerView) bool { return v.Share.Phase == "not_running" })
+	e.share.setSvc("home", func(s *fakeSvc) { s.stopped = false })
+	e.waitView("home", "paused", func(v ServerView) bool { return v.Share.Phase == "paused" })
+	if n := e.share.count("pause home"); n != 2 {
+		t.Fatalf("calls %v", e.share.Calls())
+	}
+}
+
+func TestSyncPausesWhenDisconnectedAndResumesWhenOn(t *testing.T) {
+	c := cfgWith(withShare(srvCfg("home"), true, "mac"))
+	c.Servers[0].Disconnected = true
+	e := newEnv(t, c, func(e *env) { e.share.installed("home", false, "mac") })
+	// running while the server is disconnected: paused on first sight
+	e.waitView("home", "paused", func(v ServerView) bool { return v.Share.Phase == "paused" })
+	if err := e.m.SetConnected("home", true); err != nil {
+		t.Fatal(err)
+	}
+	e.waitView("home", "ready", func(v ServerView) bool { return v.Share.Phase == "ready" })
+	// paused behind the app's back while the intent is on: resumed
+	n := e.share.count("resume home")
+	e.share.setSvc("home", func(s *fakeSvc) { s.paused = true })
+	eventually(t, "resumed", func() bool { return e.share.count("resume home") == n+1 })
+}
+
+func TestShareViewFromInstalledService(t *testing.T) {
+	c := cfgWith(withShare(srvCfg("home"), true, "old"))
+	e := newEnv(t, c, func(e *env) { e.share.installed("home", true, "svcname") })
+	e.waitView("home", "service name and mode", func(v ServerView) bool {
+		return v.Share.Name == "svcname" && v.Share.System
+	})
+	eventually(t, "config follows the service", func() bool {
+		sc := e.cfgServer("home")
+		return sc.Share.Name == "svcname" && sc.Share.System
+	})
+	// switching back to user mode now reinstalls (config agrees with the service)
+	if err := e.m.SetShareSystem("home", false); err != nil {
+		t.Fatal(err)
+	}
+	if !contains(e.share.Calls(), "uninstall home system=true") {
+		t.Fatalf("calls %v", e.share.Calls())
+	}
+}
+
+func TestAdoptRunningServiceUnknownToConfig(t *testing.T) {
+	e := newEnv(t, cfgWith(srvCfg("home")), func(e *env) { e.share.installed("home", true, "mac") })
+	e.waitView("home", "adopted", func(v ServerView) bool {
+		return v.Share.On && v.Share.Name == "mac" && v.Share.System && v.Share.Phase == "ready"
+	})
+	sc := e.cfgServer("home")
+	if !sc.Share.On || sc.Share.Name != "mac" || !sc.Share.System || !sc.Share.Decided {
+		t.Fatalf("%+v", sc.Share)
+	}
+	if e.share.count("pause home") != 0 {
+		t.Fatalf("calls %v", e.share.Calls())
+	}
+}
+
+func TestRetryShareNotRunning(t *testing.T) {
+	e := newEnv(t, cfgWith(withShare(srvCfg("home"), true, "mac")), func(e *env) {
+		e.share.installed("home", false, "mac")
+		e.share.setSvc("home", func(s *fakeSvc) { s.stopped = true })
+	})
+	if err := e.m.RetryShare("home"); !errors.Is(err, sharesvc.ErrNotRunning) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestSetPortTypedErrors(t *testing.T) {
+	e := newEnv(t, cfgWith(srvCfg("home")))
+	e.ready("home", dev("a", "id-a", true), dev("b", "id-b", true))
+	if err := e.m.SetPort("home", "a", 80); !errors.Is(err, config.ErrPortRange) {
+		t.Fatalf("range: %v", err)
+	}
+	if err := e.m.SetPort("home", "a", e.device("home", "b").Port); !errors.Is(err, config.ErrPortConflict) {
+		t.Fatalf("conflict: %v", err)
+	}
+}
+
+func TestDefaultShareName(t *testing.T) {
+	cases := map[string]string{
+		"Xins-MacBook-Pro.local": "xins-macbook-pro",
+		"My Laptop":              "my-laptop",
+		"host.example.com":       "host.example.com",
+		"-dash":                  "dash",
+		"日本":                     "device",
+		"":                       "device",
+		strings.Repeat("a", 80):  strings.Repeat("a", 64),
+	}
+	for in, want := range cases {
+		if got := defaultShareName(in); got != want {
+			t.Errorf("defaultShareName(%q) = %q, want %q", in, got, want)
+		}
+		if err := tunnel.ValidateName(defaultShareName(in)); err != nil {
+			t.Errorf("%q: %v", in, err)
+		}
+	}
+}
+
+func TestAddServerDefaultsShareName(t *testing.T) {
+	e := newEnv(t, nil)
+	if err := e.m.AddServer(srvCfg("home")); err != nil {
+		t.Fatal(err)
+	}
+	if n := e.cfgServer("home").Share.Name; n != "test-host" {
+		t.Fatalf("share name %q", n)
+	}
+	s := srvCfg("work")
+	s.Share.Name = "mine"
+	if err := e.m.AddServer(s); err != nil {
+		t.Fatal(err)
+	}
+	if n := e.cfgServer("work").Share.Name; n != "mine" {
+		t.Fatalf("share name %q", n)
+	}
+}
+
+func TestKeyPathTildeExpanded(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip(err)
+	}
+	s := withShare(srvCfg("home"), false, "mac")
+	s.KeyPath = "~/.ssh/id"
+	e := newEnv(t, cfgWith(s))
+	want := filepath.Join(home, ".ssh", "id")
+	if got := e.session("home", 1).cfg.KeyPath; got != want {
+		t.Fatalf("session key %q want %q", got, want)
+	}
+	e.ready("home")
+	if err := e.m.SetShare("home", true); err != nil {
+		t.Fatal(err)
+	}
+	e.share.mu.Lock()
+	got := e.share.lastInstall.KeyPath
+	e.share.mu.Unlock()
+	if got != want {
+		t.Fatalf("install key %q want %q", got, want)
+	}
+	if e.cfgServer("home").KeyPath != "~/.ssh/id" {
+		t.Fatal("stored key path changed")
+	}
+}
+
+func TestWaitPersistsLastSeen(t *testing.T) {
+	e := newEnv(t, cfgWith(srvCfg("home")))
+	s := e.ready("home", dev("a", "id-a", true))
+	t2 := t0.Add(2 * time.Hour)
+	e.clock.Set(t2)
+	e.refreshNow("home", s)
+	if ls := e.cfgServer("home").LastSeen["a"]; ls.Equal(t2) {
+		t.Fatal("precondition: LastSeen is saved only on shutdown")
+	}
+	e.cancel()
+	e.m.Wait()
+	if ls := e.cfgServer("home").LastSeen["a"]; !ls.Equal(t2) {
+		t.Fatalf("last seen on disk %v want %v", ls, t2)
 	}
 }

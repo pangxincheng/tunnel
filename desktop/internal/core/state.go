@@ -122,6 +122,14 @@ func (m *Manager) shareViewLocked(sc *config.Server, s *server) ShareView {
 	sv := ShareView{On: sc.Share.On, Name: sc.Share.Name, System: sc.Share.System,
 		NameErr: s.nameErr, Busy: s.busy, Phase: "off"}
 	st := s.share
+	if st.Installed { // name and mode come from the installed service (spec §6.3)
+		if st.Mode != "" {
+			sv.System = st.Mode == "system"
+		}
+		if st.Status != nil && st.Status.Name != "" {
+			sv.Name = st.Status.Name
+		}
+	}
 	switch {
 	case !st.Installed:
 	case !st.Running || st.Status == nil:

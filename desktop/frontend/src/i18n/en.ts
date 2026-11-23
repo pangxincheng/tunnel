@@ -92,6 +92,7 @@ const en: Record<MsgKey, string> = {
   sshdOffLinux: 'The SSH service is off, so sharing is unavailable. Install and start openssh-server',
   sshdOffWindows: 'The SSH service is off, so sharing is unavailable. Add “OpenSSH Server” in Settings → System → Optional features and start the service',
   cancelledAuth: 'Authorization cancelled',
+  errNotRunning: 'The sharing service is not running. Check the log.',
   logMissing: 'The log file does not exist yet',
   logJournal: 'Logs are in the system journal. Run in a terminal:',
   copyCmd: 'Copy',

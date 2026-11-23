@@ -20,7 +20,7 @@ contents:
   - src: "./bin/tunnel-app"
     dst: "/usr/local/bin/tunnel-app"
   - src: "./bin/tunnel"
-    dst: "/usr/local/bin/tunnel"
+    dst: "/usr/lib/tunnel-app/tunnel"
   - src: "./build/appicon.png"
     dst: "/usr/share/icons/hicolor/128x128/apps/tunnel-app.png"
   - src: "./build/linux/tunnel-app.desktop"

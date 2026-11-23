@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/pangxincheng/tunnel-app/desktop/internal/autostart"
 	"github.com/pangxincheng/tunnel-app/desktop/internal/config"
@@ -75,11 +77,31 @@ func (s *AppService) ServiceStartup(ctx context.Context, _ application.ServiceOp
 	return nil
 }
 
+// shutdownWait bounds how long quitting waits for the manager's final save.
+const shutdownWait = 3 * time.Second
+
 func (s *AppService) ServiceShutdown() error {
 	if s.cancel != nil {
 		s.cancel()
+		if !waitTimeout(s.mgr.Wait, shutdownWait) {
+			slog.Warn("core manager did not stop in time; quitting anyway")
+		}
 	}
 	return nil
+}
+
+// waitTimeout runs wait and reports whether it returned within d.
+func waitTimeout(wait func(), d time.Duration) bool {
+	done := make(chan struct{})
+	go func() { wait(); close(done) }()
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-done:
+		return true
+	case <-t.C:
+		return false
+	}
 }
 
 // refreshSelected refreshes the currently selected server (window re-shown).

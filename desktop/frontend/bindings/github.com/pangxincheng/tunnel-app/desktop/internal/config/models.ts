@@ -74,4 +74,11 @@ export interface ShareIntent {
     "on": boolean;
     "name": string;
     "system": boolean;
+
+    /**
+     * Decided is set once the user turned sharing on or off here (or the app
+     * adopted an already running service); until then a running service
+     * found on this server is adopted instead of paused.
+     */
+    "decided"?: boolean;
 }

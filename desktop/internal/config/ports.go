@@ -1,6 +1,9 @@
 package config
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 const (
 	firstPort = 5102
@@ -23,6 +26,12 @@ func (c *Config) assigned(port int, server, device string) bool {
 	return false
 }
 
+// CheckPort errors wrap one of these.
+var (
+	ErrPortRange    = errors.New("port out of range")
+	ErrPortConflict = errors.New("port assigned to another device")
+)
+
 // AllocatePort returns the first port >= 5102 that no device is assigned and
 // isFree accepts; 0 if none.
 func (c *Config) AllocatePort(isFree func(int) bool) int {
@@ -38,10 +47,10 @@ func (c *Config) AllocatePort(isFree func(int) bool) int {
 // any other device (on or off) across all servers.
 func (c *Config) CheckPort(server, device string, port int) error {
 	if port < minPort || port > maxPort {
-		return fmt.Errorf("端口须在 %d–%d 之间", minPort, maxPort)
+		return fmt.Errorf("端口须在 %d–%d 之间: %w", minPort, maxPort, ErrPortRange)
 	}
 	if c.assigned(port, server, device) {
-		return fmt.Errorf("端口 %d 已分配给其他设备", port)
+		return fmt.Errorf("端口 %d 已分配给其他设备: %w", port, ErrPortConflict)
 	}
 	return nil
 }

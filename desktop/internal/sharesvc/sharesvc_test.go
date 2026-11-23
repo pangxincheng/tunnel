@@ -319,3 +319,14 @@ func TestOsascriptCancelMarkerIsExact(t *testing.T) {
 		t.Fatal("bare -128 substring must not mean cancelled")
 	}
 }
+
+func TestControlNotRunning(t *testing.T) {
+	r := &fakeRunner{exit: 3, stdout: "tunnel-p(user 模式):已安装,未运行\n"}
+	s := New("t", r, "linux", "a")
+	ctx := context.Background()
+	for _, err := range []error{s.Pause(ctx, "p"), s.Resume(ctx, "p"), s.Retry(ctx, "p"), s.SetName(ctx, "p", "n")} {
+		if !errors.Is(err, ErrNotRunning) {
+			t.Errorf("err = %v, want ErrNotRunning", err)
+		}
+	}
+}

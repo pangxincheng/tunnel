@@ -1,7 +1,7 @@
 import { vi } from 'vitest'
 import { act } from '@testing-library/react'
 
-const CODES = ['offline', 'no_sshd', 'name_taken', 'cancelled', 'port_busy', 'unknown', 'passphrase', 'auth', 'dial', 'socketdir']
+const CODES = ['offline', 'no_sshd', 'name_taken', 'cancelled', 'not_running', 'port_busy', 'port_invalid', 'port_conflict', 'unknown', 'passphrase', 'auth', 'dial', 'socketdir']
 const msgOf = (e: unknown) => (e instanceof Error ? e.message : String(e))
 const codeOf = (m: string) => {
   const c = m.slice(0, Math.max(m.indexOf(':'), 0)).trim()

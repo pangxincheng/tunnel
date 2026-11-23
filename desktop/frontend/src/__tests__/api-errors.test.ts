@@ -5,7 +5,7 @@ vi.mock('@wailsio/runtime', () => ({ Events: { On: vi.fn() } }))
 import { errorCode, errorDetail } from '../api'
 
 describe('api error codes', () => {
-  it.each(['offline', 'port_busy', 'port_invalid', 'port_conflict', 'name_taken', 'cancelled', 'journal', 'nolog'])(
+  it.each(['offline', 'port_busy', 'port_invalid', 'port_conflict', 'name_taken', 'cancelled', 'not_running', 'journal', 'nolog'])(
     'recognises %s',
     (c) => {
       expect(errorCode(new Error(`${c}: detail here`))).toBe(c)

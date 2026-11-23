@@ -50,7 +50,7 @@ func (m *Manager) shareLoop(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			m.syncShare(n)
+			m.reconcileShare(n)
 		}
 		select {
 		case <-ctx.Done():
@@ -58,6 +58,103 @@ func (m *Manager) shareLoop(ctx context.Context) {
 		case <-t.C:
 		}
 	}
+}
+
+// shareClass buckets a synced share state: "" (not installed), "stopped",
+// "paused" or "running".
+func shareClass(st sharesvc.State) string {
+	switch {
+	case !st.Installed:
+		return ""
+	case !st.Running || st.Status == nil:
+		return "stopped"
+	case st.Status.Paused || st.Status.Phase == tunnel.PhasePaused:
+		return "paused"
+	}
+	return "running"
+}
+
+// ignoreNotRunning treats a stopped service as nothing to do: the share loop
+// applies the intent once the service runs again.
+func ignoreNotRunning(err error) error {
+	if errors.Is(err, sharesvc.ErrNotRunning) {
+		return nil
+	}
+	return err
+}
+
+// reconcileShare syncs profile's share state and, unless an operation on the
+// server is in progress, brings config and service in line:
+//   - the installed service's name and mode are written back to the config;
+//   - a running service the config never decided about (e.g. after a config
+//     reset) is adopted as sharing;
+//   - when the service's state changes (e.g. it starts again after being
+//     stopped) and disagrees with the intent, it is paused or resumed once.
+//     A failed fix is not retried until the next change, so a broken service
+//     isn't hammered.
+func (m *Manager) reconcileShare(profile string) {
+	m.mu.Lock()
+	s := m.servers[profile]
+	m.mu.Unlock()
+	if s == nil {
+		return
+	}
+	if !s.op.TryLock() { // the running operation syncs when it finishes
+		m.syncShare(profile)
+		return
+	}
+	defer s.op.Unlock()
+	st, err := m.shareStatus(profile)
+	if err != nil {
+		return
+	}
+	m.mu.Lock()
+	sc, ok := m.cfg.Server(profile)
+	if !ok || m.servers[profile] != s {
+		m.mu.Unlock()
+		return
+	}
+	s.share = st
+	class := shareClass(st)
+	changed := false
+	if st.Installed { // the installed service is authoritative for name and mode
+		if st.Mode != "" && (st.Mode == "system") != sc.Share.System {
+			sc.Share.System = st.Mode == "system"
+			changed = true
+		}
+		if st.Status != nil && st.Status.Name != "" && st.Status.Name != sc.Share.Name {
+			sc.Share.Name = st.Status.Name
+			changed = true
+		}
+	}
+	if class == "running" && !sc.Share.On && !sc.Share.Decided {
+		sc.Share.On, sc.Share.Decided = true, true
+		changed = true
+		m.d.Logger.Info("adopted running share service", "server", profile)
+	}
+	if changed {
+		_ = m.saveLocked()
+	}
+	var fix func(context.Context, string) error
+	if class != s.seen {
+		s.seen = class
+		want := sc.Share.On && !sc.Disconnected
+		switch {
+		case class == "running" && !want:
+			fix = m.d.Share.Pause
+		case class == "paused" && want:
+			fix = m.d.Share.Resume
+		}
+	}
+	m.mu.Unlock()
+	m.notify()
+	if fix == nil {
+		return
+	}
+	if err := fix(m.opCtx(), profile); err != nil {
+		m.d.Logger.Warn("share service disagrees with the intent; fix failed", "server", profile, "err", err)
+	}
+	m.syncShare(profile)
 }
 
 // installedSystem tells the installed service's mode, falling back to the config.
@@ -92,7 +189,7 @@ func (m *Manager) installShare(s *server, sc *config.Server, system bool) error 
 	defer m.setBusy(s, false)
 	ctx := m.opCtx()
 	if err := m.d.Share.Install(ctx, sharesvc.InstallOpts{
-		Profile: sc.Name, Name: sc.Share.Name, Host: sc.Host, User: sc.User, KeyPath: sc.KeyPath,
+		Profile: sc.Name, Name: sc.Share.Name, Host: sc.Host, User: sc.User, KeyPath: config.ExpandHome(sc.KeyPath),
 		HostKey: sc.HostKey, SocketDir: sc.SocketDir, Port: sc.Port, LocalPort: port, System: system,
 	}); err != nil {
 		return err
@@ -177,7 +274,7 @@ func (m *Manager) ensureShareRunning(s *server, name string) error {
 		return err
 	}
 	if st.Installed {
-		return m.d.Share.Resume(m.opCtx(), name)
+		return ignoreNotRunning(m.d.Share.Resume(m.opCtx(), name))
 	}
 	sc, err := m.serverCopy(name)
 	if err != nil {
@@ -203,12 +300,14 @@ func (m *Manager) SetShare(server string, on bool) error {
 		if err != nil {
 			return err
 		}
-		if st.Installed {
-			if err := m.d.Share.Pause(m.opCtx(), server); err != nil {
+		// A stopped service can't be paused now; the intent is saved anyway and
+		// the share loop pauses it once it runs again.
+		if st.Running {
+			if err := ignoreNotRunning(m.d.Share.Pause(m.opCtx(), server)); err != nil {
 				return err
 			}
 		}
-		return m.updateShareIntent(server, func(si *config.ShareIntent) { si.On = false })
+		return m.updateShareIntent(server, func(si *config.ShareIntent) { si.On, si.Decided = false, true })
 	}
 
 	sc, err := m.serverCopy(server)
@@ -226,7 +325,7 @@ func (m *Manager) SetShare(server string, on bool) error {
 			return err
 		}
 	}
-	return m.updateShareIntent(server, func(si *config.ShareIntent) { si.On = true })
+	return m.updateShareIntent(server, func(si *config.ShareIntent) { si.On, si.Decided = true, true })
 }
 
 // SetShareName changes the name this machine is shared under.
@@ -267,15 +366,18 @@ func (m *Manager) SetShareSystem(server string, system bool) error {
 	if err != nil {
 		return err
 	}
-	if sc.Share.System == system {
-		return nil
-	}
 	st, err := m.shareStatus(server)
 	if err != nil {
 		return err
 	}
+	old := installedSystem(st, sc.Share.System) // the installed service decides
+	if old == system {
+		if sc.Share.System != system {
+			return m.updateShareIntent(server, func(si *config.ShareIntent) { si.System = system })
+		}
+		return nil
+	}
 	if st.Installed {
-		old := installedSystem(st, sc.Share.System)
 		if _, err := m.localSSHPort(); err != nil { // check before removing the old service
 			return err
 		}

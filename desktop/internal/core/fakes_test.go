@@ -141,11 +141,40 @@ type fakeShare struct {
 	// signalling installStarted (non-blocking send).
 	installBlock   chan struct{}
 	installStarted chan struct{}
+	lastInstall    sharesvc.InstallOpts
 }
 
 type fakeSvc struct {
 	system, paused bool
+	stopped        bool // installed but not running (control calls fail with ErrNotRunning)
 	name, version  string
+}
+
+// setSvc changes an installed service's runtime state.
+func (f *fakeShare) setSvc(profile string, fn func(*fakeSvc)) {
+	f.mu.Lock()
+	if s, ok := f.svc[profile]; ok {
+		fn(s)
+	}
+	f.mu.Unlock()
+}
+
+func (f *fakeShare) count(call string) int {
+	n := 0
+	for _, c := range f.Calls() {
+		if c == call {
+			n++
+		}
+	}
+	return n
+}
+
+// notRunningLocked reports ErrNotRunning for a stopped service; caller holds mu.
+func (f *fakeShare) notRunningLocked(what, profile string) error {
+	if s, ok := f.svc[profile]; ok && s.stopped {
+		return fmt.Errorf("%s: %w", what, sharesvc.ErrNotRunning)
+	}
+	return nil
 }
 
 func newFakeShare() *fakeShare { return &fakeShare{svc: map[string]*fakeSvc{}} }
@@ -178,6 +207,9 @@ func (f *fakeShare) Status(ctx context.Context, profile string) (sharesvc.State,
 	if s.system {
 		mode = "system"
 	}
+	if s.stopped {
+		return sharesvc.State{Installed: true, Mode: mode}, nil
+	}
 	ph := tunnel.PhaseReady
 	if s.paused {
 		ph = tunnel.PhasePaused
@@ -200,6 +232,7 @@ func (f *fakeShare) Install(ctx context.Context, o sharesvc.InstallOpts) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.record(fmt.Sprintf("install %s name=%s system=%v local=%d", o.Profile, o.Name, o.System, o.LocalPort))
+	f.lastInstall = o
 	if len(f.installErrs) > 0 {
 		err := f.installErrs[0]
 		f.installErrs = f.installErrs[1:]
@@ -223,6 +256,9 @@ func (f *fakeShare) Pause(ctx context.Context, profile string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.record("pause " + profile)
+	if err := f.notRunningLocked("tunnel pause", profile); err != nil {
+		return err
+	}
 	if len(f.pauseErrs) > 0 {
 		err := f.pauseErrs[0]
 		f.pauseErrs = f.pauseErrs[1:]
@@ -240,6 +276,9 @@ func (f *fakeShare) Resume(ctx context.Context, profile string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.record("resume " + profile)
+	if err := f.notRunningLocked("tunnel resume", profile); err != nil {
+		return err
+	}
 	if s, ok := f.svc[profile]; ok {
 		s.paused = false
 	}
@@ -250,13 +289,16 @@ func (f *fakeShare) Retry(ctx context.Context, profile string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.record("retry " + profile)
-	return nil
+	return f.notRunningLocked("tunnel retry", profile)
 }
 
 func (f *fakeShare) SetName(ctx context.Context, profile, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.record(fmt.Sprintf("setname %s %s", profile, name))
+	if err := f.notRunningLocked("tunnel set-name", profile); err != nil {
+		return err
+	}
 	if s, ok := f.svc[profile]; ok {
 		s.name = name
 	}
@@ -283,6 +325,7 @@ type env struct {
 	clock    *fakeClock
 	mu       sync.Mutex
 	sshd     sshd.Result
+	hostname string
 	changes  int
 	detects  int
 	lastSeen AppState
@@ -329,7 +372,7 @@ func (e *env) reopen(prep ...func(*env)) *env {
 func startEnv(t *testing.T, path string, clock *fakeClock, prep ...func(*env)) *env {
 	t.Helper()
 	e := &env{t: t, path: path, sess: &sessFactory{}, share: newFakeShare(), clock: clock,
-		sshd: sshd.Result{Running: true, Port: 22}, refreshEvery: 10 * time.Millisecond, shareEvery: 10 * time.Millisecond}
+		sshd: sshd.Result{Running: true, Port: 22}, hostname: "Test-Host.local", refreshEvery: 10 * time.Millisecond, shareEvery: 10 * time.Millisecond}
 	for _, p := range prep {
 		p(e)
 	}
@@ -340,6 +383,7 @@ func startEnv(t *testing.T, path string, clock *fakeClock, prep ...func(*env)) *
 		DetectSSHD: func(context.Context) sshd.Result { e.mu.Lock(); defer e.mu.Unlock(); e.detects++; return e.sshd },
 		DeviceID:   "self",
 		PortFree:   func(int) bool { return true },
+		Hostname:   func() (string, error) { return e.hostname, nil },
 		Now:        e.clock.Now,
 		OnChange: func(s AppState) {
 			e.mu.Lock()

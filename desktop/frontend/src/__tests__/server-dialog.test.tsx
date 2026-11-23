@@ -203,6 +203,16 @@ describe('Server dialog', () => {
     expect(screen.getByRole('dialog')).toBeTruthy()
   })
 
+  it('a cancelled authorization on save shows 已取消授权', async () => {
+    apiMock.UpdateServer.mockRejectedValue(new Error('cancelled: authorization cancelled'))
+    const { user } = await open(base(), 'edit')
+    await user.clear(screen.getByLabelText('名称'))
+    await user.type(screen.getByLabelText('名称'), 'home2')
+    await user.click(saveBtn())
+    expect((await screen.findByText('已取消授权')).closest('.dlg-f')).toBeTruthy()
+    expect(screen.getByRole('dialog')).toBeTruthy()
+  })
+
   it('empty-state main button opens the add dialog', async () => {
     apiMock.GetState.mockResolvedValue(appState())
     render(<App />)

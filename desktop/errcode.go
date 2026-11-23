@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/pangxincheng/tunnel-app/desktop/internal/config"
 	"github.com/pangxincheng/tunnel-app/desktop/internal/core"
 	"github.com/pangxincheng/tunnel-app/desktop/internal/probe"
 	"github.com/pangxincheng/tunnel-app/desktop/internal/sharesvc"
@@ -32,6 +33,12 @@ func errCode(err error) string {
 		return "socketdir"
 	case errors.Is(err, sharesvc.ErrCancelled):
 		return "cancelled"
+	case errors.Is(err, sharesvc.ErrNotRunning):
+		return "not_running"
+	case errors.Is(err, config.ErrPortRange):
+		return "port_invalid"
+	case errors.Is(err, config.ErrPortConflict):
+		return "port_conflict"
 	case errors.Is(err, core.ErrDeviceOffline):
 		return "offline"
 	case errors.Is(err, core.ErrNoSSHD):

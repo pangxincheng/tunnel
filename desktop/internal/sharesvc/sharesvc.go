@@ -54,6 +54,12 @@ func (ExecRunner) Run(ctx context.Context, name string, args ...string) ([]byte,
 // ErrCancelled 表示用户取消了系统授权。
 var ErrCancelled = errors.New("authorization cancelled")
 
+// ErrNotRunning 表示服务已安装但没有在运行(CLI 退出码 3,控制通道连不上)。
+var ErrNotRunning = errors.New("share service is not running")
+
+// exitNotRunning 是 CLI 在服务已安装、控制通道连不上时的退出码。
+const exitNotRunning = 3
+
 // State 是共享服务的当前状态。
 type State struct {
 	Installed, Running bool
@@ -119,7 +125,7 @@ func (s *Service) Status(ctx context.Context, profile string) (State, error) {
 		}
 		st := j.ShareStatus
 		return State{Installed: true, Running: true, Mode: j.Mode, Status: &st}, nil
-	case 3:
+	case exitNotRunning:
 		var j struct {
 			Mode string `json:"mode"`
 		}
@@ -142,6 +148,9 @@ func (s *Service) simple(ctx context.Context, what string, args ...string) error
 	_, errOut, exit, err := s.runner.Run(ctx, s.bin, args...)
 	if err != nil {
 		return err
+	}
+	if exit == exitNotRunning {
+		return fmt.Errorf("%s: %w", what, ErrNotRunning)
 	}
 	if exit != 0 {
 		return cliError(what, exit, errOut)

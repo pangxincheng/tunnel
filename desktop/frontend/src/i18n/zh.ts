@@ -90,6 +90,7 @@ const zh = {
   sshdOffLinux: '本机 SSH 服务未开启,不能共享。安装并启动 openssh-server',
   sshdOffWindows: '本机 SSH 服务未开启,不能共享。在 设置 → 系统 → 可选功能 中添加“OpenSSH 服务器”并启动服务',
   cancelledAuth: '已取消授权',
+  errNotRunning: '共享服务没有在运行，请查看日志',
   logMissing: '日志文件还不存在',
   logJournal: '日志在系统日志里,在终端运行:',
   copyCmd: '复制',

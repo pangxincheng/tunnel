@@ -7,6 +7,7 @@ import (
 	"net"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,6 +30,7 @@ type server struct {
 	share   sharesvc.State    // last synced share state
 	nameErr string
 	busy    bool
+	seen    string // share class last seen by the share loop (see reconcileShare)
 }
 
 func newServer() *server { return &server{fwdErr: map[string]string{}} }
@@ -52,7 +54,7 @@ func tunnelConfig(sc *config.Server) *tunnel.Config {
 	return &tunnel.Config{
 		SSHAddr: net.JoinHostPort(sc.Host, strconv.Itoa(sc.Port)),
 		User:    sc.User,
-		KeyPath: sc.KeyPath,
+		KeyPath: config.ExpandHome(sc.KeyPath),
 		HostPub: sc.HostKey,
 	}
 }
@@ -302,10 +304,10 @@ func (m *Manager) SetPort(server, device string, port int) error {
 		return ErrUnknownDevice
 	}
 	if err := m.cfg.CheckPort(server, device, port); err != nil {
-		if port < 1024 || port > 65535 {
-			s.fwdErr[device] = "port_invalid"
-		} else {
+		if errors.Is(err, config.ErrPortConflict) {
 			s.fwdErr[device] = "port_conflict"
+		} else {
+			s.fwdErr[device] = "port_invalid"
 		}
 		return err
 	}
@@ -335,10 +337,39 @@ func checkHostKey(hk string) error {
 	return nil
 }
 
-// AddServer adds and (once started) connects a new server.
+// defaultShareName turns a host name into a valid share name: lowercase,
+// a trailing ".local" dropped, other characters replaced by '-', leading
+// non-alphanumerics trimmed, at most 64 characters; "device" if nothing is left.
+func defaultShareName(host string) string {
+	h := strings.TrimSuffix(strings.ToLower(host), ".local")
+	b := make([]byte, 0, len(h))
+	for _, r := range h {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			b = append(b, byte(r))
+		default:
+			b = append(b, '-')
+		}
+	}
+	n := strings.TrimLeft(string(b), "._-")
+	if len(n) > 64 {
+		n = n[:64]
+	}
+	if tunnel.ValidateName(n) != nil {
+		return "device"
+	}
+	return n
+}
+
+// AddServer adds and (once started) connects a new server. An empty share
+// name defaults to this machine's host name.
 func (m *Manager) AddServer(s config.Server) error {
 	if err := checkHostKey(s.HostKey); err != nil {
 		return err
+	}
+	if s.Share.Name == "" {
+		h, _ := m.d.Hostname()
+		s.Share.Name = defaultShareName(h)
 	}
 	m.mu.Lock()
 	defer m.notify()
@@ -566,10 +597,10 @@ func (m *Manager) SetConnected(name string, on bool) error {
 		return m.ensureShareRunning(s, name)
 	}
 	st, err := m.shareStatus(name)
-	if err != nil || !st.Installed {
-		return err
+	if err != nil || !st.Running {
+		return err // a stopped service is paused by the share loop once it runs
 	}
-	return m.d.Share.Pause(m.opCtx(), name)
+	return ignoreNotRunning(m.d.Share.Pause(m.opCtx(), name))
 }
 
 // Retry reconnects the server's Session immediately.

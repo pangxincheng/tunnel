@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -228,5 +229,18 @@ func TestProbeStalledExec(t *testing.T) {
 	}
 	if time.Since(start) > 3*time.Second {
 		t.Errorf("took %v", time.Since(start))
+	}
+}
+
+func TestProbeExpandsTildeKeyPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("HOME is not the home directory on windows")
+	}
+	cs, cpriv := newSigner(t)
+	srv := startServer(t, cs.PublicKey())
+	key := writeKey(t, cpriv, "")
+	t.Setenv("HOME", filepath.Dir(key))
+	if _, err := Test(t.Context(), srv.params("~/"+filepath.Base(key))); err != nil {
+		t.Fatal(err)
 	}
 }

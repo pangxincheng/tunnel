@@ -1,4 +1,17 @@
+import { errorCode, errorMessage } from './api'
 import { t, type MsgKey } from './i18n'
+
+/** Sentence for a failed action: known codes translated, otherwise the raw message. */
+export function actionError(e: unknown): string {
+  switch (errorCode(e)) {
+    case 'cancelled':
+      return t('cancelledAuth')
+    case 'not_running':
+      return t('errNotRunning')
+    default:
+      return errorMessage(e)
+  }
+}
 
 /** Whole-unit duration in the current language: "3 天", "5 分钟", "12 秒". */
 export function duration(ms: number): string {

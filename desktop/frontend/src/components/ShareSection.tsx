@@ -62,6 +62,7 @@ export default function ShareSection({ server, platform, sshd, disabled }: Props
   const fail = (e: unknown) => {
     const code = errorCode(e)
     if (code === 'cancelled') flash(t('cancelledAuth'))
+    else if (code === 'not_running') setNote({ kind: 'text', text: t('errNotRunning') })
     else if (code === 'no_sshd') setNote({ kind: 'text', text: sshdOff() })
     else if (code === 'name_taken') setNameErr(t('nameTaken', { name: attempted.current || share.name, server: server.name }))
     else setNote({ kind: 'text', text: errorDetail(e) })

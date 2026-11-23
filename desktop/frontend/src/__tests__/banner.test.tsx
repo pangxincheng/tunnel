@@ -74,6 +74,20 @@ describe('Banner', () => {
     expect(apiMock.SetConnected).toHaveBeenCalledWith('home', true)
   })
 
+  it('a failed connect shows the mapped sentence in the banner', async () => {
+    apiMock.SetConnected.mockRejectedValueOnce(new Error('cancelled: authorization cancelled'))
+    render(<Banner server={server({ conn: 'disconnected' })} />)
+    await act(async () => {
+      fireEvent.click(screen.getByText('连接'))
+    })
+    expect(screen.getByRole('alert').textContent).toBe('已取消授权')
+    apiMock.SetConnected.mockRejectedValueOnce(new Error('tunnel resume: boom'))
+    await act(async () => {
+      fireEvent.click(screen.getByText('连接'))
+    })
+    expect(screen.getByRole('alert').textContent).toBe('tunnel resume: boom')
+  })
+
   it('shows nothing when ready or connecting', () => {
     expect(render(<Banner server={server({ conn: 'ready' })} />).container.firstChild).toBeNull()
     expect(render(<Banner server={server({ conn: 'connecting' })} />).container.firstChild).toBeNull()
