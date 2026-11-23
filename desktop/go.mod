@@ -13,7 +13,7 @@ require (
 	github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/pkg/sftp v1.13.12 // indirect
-	golang.org/x/crypto v0.57.0 // indirect
+	golang.org/x/crypto v0.57.0
 )
 
 require (
