@@ -4,12 +4,13 @@ import { t, type MsgKey } from '../i18n'
 import Dialog from './Dialog'
 import Switch from './Switch'
 
-const ACCENTS: { id: string; label: MsgKey; color: string }[] = [
-  { id: 'green', label: 'accentGreen', color: '#13795B' },
-  { id: 'blue', label: 'accentBlue', color: '#2457D6' },
-  { id: 'violet', label: 'accentViolet', color: '#6544E0' },
-  { id: 'amber', label: 'accentAmber', color: '#A85A06' },
-  { id: 'graphite', label: 'accentGraphite', color: '#3E4651' },
+// Swatch colours live in tokens.css (per theme), keyed by data-accent.
+const ACCENTS: { id: string; label: MsgKey }[] = [
+  { id: 'green', label: 'accentGreen' },
+  { id: 'blue', label: 'accentBlue' },
+  { id: 'violet', label: 'accentViolet' },
+  { id: 'amber', label: 'accentAmber' },
+  { id: 'graphite', label: 'accentGraphite' },
 ]
 
 function Seg({ value, options, onPick }: { value: string; options: [string, string][]; onPick: (v: string) => void }) {
@@ -29,6 +30,14 @@ export default function SettingsDialog({ settings, onClose }: { settings: Settin
   const [version, setVersion] = useState('')
   const [err, setErr] = useState('')
   const doneRef = useRef<HTMLButtonElement>(null)
+  // Latest settings sent or received: patches merge into this, so two quick
+  // changes before the next state event don't revert each other.
+  const latest = useRef(settings)
+  const seen = useRef(settings)
+  if (seen.current !== settings) {
+    seen.current = settings
+    latest.current = settings
+  }
 
   useEffect(() => {
     let live = true
@@ -41,7 +50,9 @@ export default function SettingsDialog({ settings, onClose }: { settings: Settin
   }, [])
 
   const update = (patch: Partial<Settings>) => {
-    UpdateSettings({ ...settings, ...patch })
+    const next = { ...latest.current, ...patch }
+    latest.current = next
+    UpdateSettings(next)
       .then(() => setErr(''))
       .catch((e) =>
         setErr(
@@ -90,7 +101,6 @@ export default function SettingsDialog({ settings, onClose }: { settings: Settin
                     key={a.id}
                     type="button"
                     className={a.id === settings.accent ? 'swatch sel' : 'swatch'}
-                    style={{ background: a.color }}
                     data-accent={a.id}
                     aria-label={t(a.label)}
                     aria-pressed={a.id === settings.accent}

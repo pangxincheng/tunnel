@@ -16,6 +16,12 @@ describe('i18n', () => {
     )
   })
 
+  it('formats the server summary as one sentence', () => {
+    expect(t('serverSummary', { connected: 1, online: 3 })).toBe('已连接 1\u3000在线 3')
+    setLang('en')
+    expect(t('serverSummary', { connected: 1, online: 3 })).toBe('1 connected · 3 online')
+  })
+
   it('switches language', () => {
     setLang('en')
     expect(t('settings')).toBe('Settings')

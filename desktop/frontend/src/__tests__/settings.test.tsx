@@ -5,6 +5,7 @@ import { apiMock, resetApiMock, pushState } from './apiMock'
 import { appState, server } from './fixtures'
 import { setLang } from '../i18n'
 import App from '../App'
+import { readFileSync } from 'node:fs'
 
 vi.mock('../api', async () => (await import('./apiMock')).apiMock)
 
@@ -30,6 +31,35 @@ describe('Settings dialog', () => {
     await user.click(screen.getByRole('button', { name: '深色' }))
     expect(apiMock.UpdateSettings).toHaveBeenCalledTimes(1)
     expect(apiMock.UpdateSettings.mock.calls[0][0]).toMatchObject({ mode: 'dark', accent: 'green', lang: 'zh' })
+  })
+
+  it('two quick changes before a state event are both sent', async () => {
+    const { user } = await openSettings()
+    await user.click(screen.getByRole('button', { name: '深色' }))
+    await user.click(screen.getByRole('button', { name: '蓝色' }))
+    expect(apiMock.UpdateSettings).toHaveBeenCalledTimes(2)
+    expect(apiMock.UpdateSettings.mock.calls[1][0]).toMatchObject({ mode: 'dark', accent: 'blue' })
+  })
+
+  it('a newer state replaces the pending merge base', async () => {
+    const { user } = await openSettings()
+    await user.click(screen.getByRole('button', { name: '深色' }))
+    pushState({ ...base(), settings: { ...base().settings, mode: 'light' } })
+    await user.click(screen.getByRole('button', { name: '蓝色' }))
+    expect(apiMock.UpdateSettings.mock.calls[1][0]).toMatchObject({ mode: 'light', accent: 'blue' })
+  })
+
+  it('swatch colours come from CSS, not inline styles', async () => {
+    const { dialog } = await openSettings()
+    for (const sw of dialog.querySelectorAll<HTMLElement>('button.swatch')) {
+      expect(sw.getAttribute('style')).toBeNull()
+      expect(sw.dataset.accent).toBeTruthy()
+    }
+    const css = readFileSync('src/styles/tokens.css', 'utf8')
+    for (const a of ['green', 'blue', 'violet', 'amber', 'graphite']) {
+      expect(css).toContain(`--accent-${a}:`)
+      expect(css.match(new RegExp(`--accent-${a}:`, 'g'))!.length).toBe(2) // light + dark
+    }
   })
 
   it('toggles general switches and shows the version', async () => {

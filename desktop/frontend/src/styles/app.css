@@ -1,6 +1,6 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body, #root { height: 100%; }
-body { font-family: var(--ui); overflow: hidden; -webkit-font-smoothing: antialiased; background: #F3F4F6; }
+body { font-family: var(--ui); overflow: hidden; -webkit-font-smoothing: antialiased; background: var(--canvas); color: var(--ink); }
 button, input, select { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--live); outline-offset: 2px; }
 .dlg:focus { outline: none; }
@@ -90,6 +90,11 @@ button, input, select { font: inherit; color: inherit; }
 .seg button.sel { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px var(--shadow); }
 .swatches { display: flex; gap: 10px; }
 .swatch { width: 20px; height: 20px; border-radius: 50%; border: 0; cursor: pointer; box-shadow: 0 0 0 1px var(--shadow); }
+.swatch[data-accent="green"] { background: var(--accent-green); }
+.swatch[data-accent="blue"] { background: var(--accent-blue); }
+.swatch[data-accent="violet"] { background: var(--accent-violet); }
+.swatch[data-accent="amber"] { background: var(--accent-amber); }
+.swatch[data-accent="graphite"] { background: var(--accent-graphite); }
 .swatch.sel { box-shadow: 0 0 0 2px var(--canvas), 0 0 0 4px var(--live); }
 
 /* ---------- dialogs ---------- */

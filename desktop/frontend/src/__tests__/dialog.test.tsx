@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import Dialog from '../components/Dialog'
 
@@ -68,5 +68,54 @@ describe('Dialog', () => {
     rerender(<div />)
     expect(document.activeElement).toBe(opener)
     opener.remove()
+  })
+
+  it('only the top dialog of a stack handles Esc / Enter', async () => {
+    const outerCancel = vi.fn()
+    const innerCancel = vi.fn()
+    const innerSubmit = vi.fn()
+    const outerSubmit = vi.fn()
+    const tree = (inner: boolean) => (
+      <>
+        <Dialog title="outer" onCancel={outerCancel} onSubmit={outerSubmit}>
+          <p>o</p>
+        </Dialog>
+        {inner && (
+          <Dialog title="inner" onCancel={innerCancel} onSubmit={innerSubmit}>
+            <p>i</p>
+          </Dialog>
+        )}
+      </>
+    )
+    const { rerender } = render(tree(false))
+    rerender(tree(true))
+    const user = userEvent.setup()
+    await user.keyboard('{Enter}')
+    expect(innerSubmit).toHaveBeenCalledTimes(1)
+    expect(outerSubmit).not.toHaveBeenCalled()
+    await user.keyboard('{Escape}')
+    expect(innerCancel).toHaveBeenCalledTimes(1)
+    expect(outerCancel).not.toHaveBeenCalled()
+    rerender(tree(false))
+    await user.keyboard('{Escape}')
+    expect(outerCancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('a drag that starts inside the dialog and ends on the scrim does not cancel', () => {
+    const onCancel = vi.fn()
+    const { container } = render(
+      <Dialog title="T" onCancel={onCancel} onSubmit={() => {}}>
+        <p>body</p>
+      </Dialog>,
+    )
+    const scrim = container.querySelector('.scrim')!
+    fireEvent.mouseDown(screen.getByText('body'))
+    fireEvent.mouseUp(scrim)
+    fireEvent.click(scrim)
+    expect(onCancel).not.toHaveBeenCalled()
+    fireEvent.mouseDown(scrim)
+    fireEvent.mouseUp(scrim)
+    fireEvent.click(scrim)
+    expect(onCancel).toHaveBeenCalledTimes(1)
   })
 })

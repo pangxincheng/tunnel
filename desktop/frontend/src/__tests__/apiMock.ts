@@ -19,6 +19,10 @@ export const apiMock = {
   errorDetail: vi.fn((e: unknown) => String(e)),
 }
 
+export function stateListenerCount() {
+  return handlers.size
+}
+
 export function pushState(s: unknown) {
   act(() => {
     handlers.forEach((h) => h(s))

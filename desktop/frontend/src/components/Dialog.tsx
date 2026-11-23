@@ -12,6 +12,9 @@ interface Props {
   children: ReactNode
 }
 
+// Open dialogs, bottom to top; only the top one handles keys.
+const stack: symbol[] = []
+
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
@@ -24,17 +27,20 @@ const FOCUSABLE =
 export default function Dialog({ title, subtitle, onCancel, onSubmit, initialFocus, wide, footer, children }: Props) {
   const dlgRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
+  const downOnScrim = useRef(false)
   const cancelRef = useRef(onCancel)
   const submitRef = useRef(onSubmit)
   cancelRef.current = onCancel
   submitRef.current = onSubmit
 
   useEffect(() => {
+    const me = Symbol('dialog')
+    stack.push(me)
     const opener = document.activeElement as HTMLElement | null
     ;(initialFocus?.current ?? dlgRef.current)?.focus()
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.isComposing) return
+      if (e.defaultPrevented || e.isComposing || stack[stack.length - 1] !== me) return
       const dlg = dlgRef.current
       if (!dlg) return
       if (e.key === 'Escape') {
@@ -68,6 +74,8 @@ export default function Dialog({ title, subtitle, onCancel, onSubmit, initialFoc
     document.addEventListener('keydown', onKey)
     return () => {
       document.removeEventListener('keydown', onKey)
+      const i = stack.indexOf(me)
+      if (i >= 0) stack.splice(i, 1)
       if (opener && opener.isConnected) opener.focus()
     }
     // initialFocus is only read on mount
@@ -77,8 +85,14 @@ export default function Dialog({ title, subtitle, onCancel, onSubmit, initialFoc
   return (
     <div
       className="scrim"
+      onMouseDown={(e) => {
+        downOnScrim.current = e.target === e.currentTarget
+      }}
       onClick={(e) => {
-        if (e.target === e.currentTarget) cancelRef.current()
+        // a drag that started inside the dialog must not cancel it
+        const ok = downOnScrim.current && e.target === e.currentTarget
+        downOnScrim.current = false
+        if (ok) cancelRef.current()
       }}
     >
       <div

@@ -31,10 +31,25 @@ export default function App() {
     if (lang) document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en'
   }, [lang])
 
+  const mode = state?.settings.mode
+  const accent = state?.settings.accent
+  const dark = mode === 'dark' || (mode === 'system' && systemDark)
+  const loaded = !!state
+  // Mirror the theme on <html> so the body background and overscroll follow it.
+  useEffect(() => {
+    if (!loaded) return
+    const el = document.documentElement
+    el.classList.toggle('dark', dark)
+    el.dataset.accent = accent
+    return () => {
+      el.classList.remove('dark')
+      delete el.dataset.accent
+    }
+  }, [loaded, dark, accent])
+
   if (!state) return null
 
   const { settings } = state
-  const dark = settings.mode === 'dark' || (settings.mode === 'system' && systemDark)
   const servers = state.servers ?? []
   const current = servers.find((s) => s.name === state.selected) ?? servers[0]
 

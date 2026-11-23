@@ -53,7 +53,7 @@ export default function Sidebar({ state, onAdd, onEdit, onDelete, onSettings }: 
                         ? t('unreachable')
                         : s.conn === 'connecting'
                           ? t('connecting')
-                          : `${t('connectedN', { c: s.connected })}　${t('onlineN', { o: s.online })}`}
+                          : t('serverSummary', { connected: s.connected, online: s.online })}
                   </div>
                 </div>
               </button>
