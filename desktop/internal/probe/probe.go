@@ -18,9 +18,11 @@ import (
 const timeout = 10 * time.Second
 
 type Params struct {
-	Host                     string
-	Port                     int
-	User, KeyPath, SocketDir string
+	Host      string `json:"host"`
+	Port      int    `json:"port"`
+	User      string `json:"user"`
+	KeyPath   string `json:"key_path"`
+	SocketDir string `json:"socket_dir"`
 }
 
 type Result struct {

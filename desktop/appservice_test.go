@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -77,10 +78,16 @@ func (fakeShare) Retry(context.Context, string) error                 { return n
 func (fakeShare) SetName(context.Context, string, string) error       { return nil }
 func (fakeShare) LogPath(string, bool) string                         { return "" }
 
-type fakeAuto struct{ calls []string }
+type fakeAuto struct {
+	calls []string
+	fail  error
+}
 
-func (f *fakeAuto) Enable(exe string) error { f.calls = append(f.calls, "enable "+exe); return nil }
-func (f *fakeAuto) Disable() error          { f.calls = append(f.calls, "disable"); return nil }
+func (f *fakeAuto) Enable(exe string) error {
+	f.calls = append(f.calls, "enable "+exe)
+	return f.fail
+}
+func (f *fakeAuto) Disable() error { f.calls = append(f.calls, "disable"); return nil }
 
 func newTestService(t *testing.T) (*AppService, *fakeAuto) {
 	t.Helper()
@@ -113,6 +120,32 @@ func TestUpdateSettingsTogglesAutostartOnlyOnChange(t *testing.T) {
 	}
 	if got := strings.Join(fa.calls, ","); got != "enable /fake/tunnel-app,disable" {
 		t.Fatalf("calls = %q", got)
+	}
+}
+
+func TestUpdateSettingsAutostartFailureKeepsFlag(t *testing.T) {
+	s, fa := newTestService(t)
+	fa.fail = errors.New("denied")
+	st := s.GetState().Settings
+	st.Mode, st.LaunchAtLogin = "dark", true
+	err := s.UpdateSettings(st)
+	if err == nil || !strings.HasPrefix(err.Error(), "autostart:") {
+		t.Fatalf("err = %v", err)
+	}
+	got := s.GetState().Settings
+	if got.LaunchAtLogin || got.Mode != "dark" {
+		t.Fatalf("settings = %+v (flag must stay off, other fields saved)", got)
+	}
+}
+
+func TestJSONShapeIsSnakeCase(t *testing.T) {
+	b, _ := json.Marshal(probe.Params{})
+	if string(b) != `{"host":"","port":0,"user":"","key_path":"","socket_dir":""}` {
+		t.Errorf("Params json = %s", b)
+	}
+	b, _ = json.Marshal(ProbeView{})
+	if string(b) != `{"fingerprint":"","host_key":"","socket_dir":""}` {
+		t.Errorf("ProbeView json = %s", b)
 	}
 }
 
@@ -168,5 +201,19 @@ func TestOpenLogJournalAndMissing(t *testing.T) {
 	s.open = func(p string) error { opened = p; return nil }
 	if err := s.openLogPath("home", f, false); err != nil || opened != f {
 		t.Fatalf("open: %v %q", err, opened)
+	}
+}
+
+func TestQuitCallsHookAndTemplateIconIsPNG(t *testing.T) {
+	s, _ := newTestService(t)
+	s.Quit() // no hook: must not panic
+	called := false
+	s.quit = func() { called = true }
+	s.Quit()
+	if !called {
+		t.Error("quit hook not called")
+	}
+	if b := templateIcon(); len(b) < 8 || string(b[1:4]) != "PNG" {
+		t.Error("template icon is not a PNG")
 	}
 }

@@ -57,6 +57,13 @@ export function PickKeyFile(): $CancellablePromise<string> {
     return $Call.ByID(3467458596);
 }
 
+/**
+ * Quit exits the app (the window's close button only hides it).
+ */
+export function Quit(): $CancellablePromise<void> {
+    return $Call.ByID(2719743713);
+}
+
 export function Refresh(name: string): $CancellablePromise<void> {
     return $Call.ByID(1206700513, name);
 }

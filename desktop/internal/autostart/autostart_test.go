@@ -73,6 +73,17 @@ func TestAutostartLinuxDesktop(t *testing.T) {
 	}
 }
 
+func TestAutostartLinuxEscapesPercent(t *testing.T) {
+	home := t.TempDir()
+	if err := Enable("linux", "/opt/100%/tunnel-app", home); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(filepath.Join(home, ".config", "autostart", "tunnel-app.desktop"))
+	if !strings.Contains(string(b), `Exec="/opt/100%%/tunnel-app"`) {
+		t.Errorf("percent not escaped:\n%s", b)
+	}
+}
+
 func TestAutostartWindowsUsesRegistry(t *testing.T) {
 	vals := map[string]string{}
 	oldSet, oldDel, oldGet := regSet, regDel, regGet

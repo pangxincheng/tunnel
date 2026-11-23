@@ -123,6 +123,8 @@ func linuxDesktop(exe string) string {
 	var q strings.Builder
 	for _, r := range exe {
 		switch r {
+		case '%':
+			q.WriteString("%") // a literal % is "%%" in Exec
 		case '"', '`', '$':
 			q.WriteString(`\\`)
 		case '\\':

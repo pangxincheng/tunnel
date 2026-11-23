@@ -15,10 +15,10 @@ import (
 var assets embed.FS
 
 func main() {
-	var app *application.App
+	var appPtr atomic.Pointer[application.App] // OnChange runs on other goroutines
 	mgr, err := newManager(func(st core.AppState) {
-		if app != nil {
-			app.Event.Emit("state", st)
+		if a := appPtr.Load(); a != nil {
+			a.Event.Emit("state", st)
 		}
 	})
 	if err != nil {
@@ -27,7 +27,7 @@ func main() {
 	svc := newAppService(mgr)
 
 	var quitting atomic.Bool
-	app = application.New(application.Options{
+	app := application.New(application.Options{
 		Name:        "Tunnel",
 		Description: "Manage tunnel forwards and share this computer",
 		Services:    []application.Service{application.NewService(svc)},
@@ -40,6 +40,8 @@ func main() {
 		},
 		ShouldQuit: func() bool { quitting.Store(true); return true },
 	})
+
+	appPtr.Store(app)
 
 	opts := application.WebviewWindowOptions{
 		Title:     "Tunnel",
@@ -61,8 +63,13 @@ func main() {
 		}
 		win.Show()
 		win.Focus()
+		// The WindowShow event is not emitted by every backend (GTK), so
+		// refresh explicitly whenever the window is brought back.
+		svc.refreshSelected()
 	}
 	quit := func() { quitting.Store(true); app.Quit() }
+	svc.quit = quit
+	app.Menu.Set(appMenu(app, quit))
 	hasTray := setupTray(app, show, quit)
 
 	win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
@@ -76,7 +83,6 @@ func main() {
 			win.Minimise()
 		}
 	})
-	win.OnWindowEvent(events.Common.WindowShow, func(*application.WindowEvent) { svc.refreshSelected() })
 	if runtime.GOOS == "darwin" { // dock-icon click re-opens the window
 		app.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(*application.ApplicationEvent) { show() })
 	}

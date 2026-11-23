@@ -62,6 +62,7 @@ type AppService struct {
 	exe   func() (string, error)
 	probe func(context.Context, probe.Params) (probe.Result, error)
 	open  func(path string) error
+	quit  func() // set by main
 }
 
 func newAppService(m *core.Manager) *AppService {
@@ -130,20 +131,33 @@ func (s *AppService) UpdateShare(server string) error { return wrapErr(s.mgr.Upd
 // removes the login item.
 func (s *AppService) UpdateSettings(st config.Settings) error {
 	was := s.mgr.State().Settings.LaunchAtLogin
+	var autoErr error
+	if st.LaunchAtLogin != was {
+		if !st.LaunchAtLogin {
+			autoErr = s.auto.Disable()
+		} else if exe, err := s.exe(); err != nil {
+			autoErr = err
+		} else {
+			autoErr = s.auto.Enable(exe)
+		}
+		if autoErr != nil {
+			st.LaunchAtLogin = was // keep the persisted flag truthful
+		}
+	}
 	if err := s.mgr.UpdateSettings(st); err != nil {
 		return wrapErr(err)
 	}
-	if st.LaunchAtLogin == was {
-		return nil
+	if autoErr != nil {
+		return fmt.Errorf("autostart: %w", autoErr)
 	}
-	if !st.LaunchAtLogin {
-		return s.auto.Disable()
+	return nil
+}
+
+// Quit exits the app (the window's close button only hides it).
+func (s *AppService) Quit() {
+	if s.quit != nil {
+		s.quit()
 	}
-	exe, err := s.exe()
-	if err != nil {
-		return err
-	}
-	return s.auto.Enable(exe)
 }
 
 // OpenLog opens the share service log of server in the system viewer.
