@@ -33,6 +33,12 @@
 - 删除确认原文:「删除 {name}?会停止在它上面的共享和 {n} 个转发,并删除这台服务器在本机的配置。服务器上的数据不受影响。」默认焦点在「取消」。
 - 重名提示原文:「「{name}」在 {server} 上已被另一台设备使用,换一个名字」。
 - 弹窗:Esc 或点遮罩 = 取消,回车 = 主按钮。
+- **原地更新(用户定,修复原型 bug)**:弹窗内的任何操作(如设置里切换显示模式、主题色、语言、开关)只更新被改动的控件,弹窗本身不卸载、不重新挂载、不重播进场动画,焦点留在被点击的控件上。组件 key 必须稳定,不能把弹窗内容放在随状态变化而重建的组件里。整个 App 同理:`state` 事件到来时只做原地更新。
+- **窗口按钮的平台差异(用户定)**:
+  - macOS:标题栏隐藏并内嵌(Wails `Mac.TitleBar` 用 hidden-inset 一类的预设,以 v3.1.0 文档为准),红绿灯按钮在**左上角**,叠在侧栏顶部;侧栏顶部留出 46px 高的拖动区(`--wails-draggable: drag`),左侧为红绿灯让出约 78px。
+  - Windows / Linux:使用系统原生标题栏,最小化 / 最大化 / 关闭在**右上角**,由系统绘制;侧栏顶部不留红绿灯空位,也不自绘任何窗口按钮。
+  - 前端根元素带 `data-platform="darwin|windows|linux"`(取自 `AppState.Platform`),只用它切换上述布局差异。
+  - 原型 v12 侧栏顶部的假红绿灯只是演示,不要照搬。
 - Wails 只能出现在 `desktop/main.go`、`desktop/appservice.go`、`desktop/tray.go` 中;其余 Go 包不得 import Wails。
 
 ## Review Focus
@@ -373,7 +379,7 @@ type DeviceView struct {
 
 - [ ] **Step 1:** 先写失败的测试:`TestAutostartDarwinPlist` 与 `TestAutostartLinuxDesktop`(home 指向临时目录,断言文件内容中有 exe 路径,`Disable` 后文件被删除)、`TestAutostartWindowsUsesRegistry`(假的 regSet)、`TestProbeErrorCodes`(`ErrPassphrase` 转成以 `passphrase:` 开头的消息,其余错误类似)。
 - [ ] **Step 2–4:** 运行 `go test ./... -race`,预期先失败;实现后再运行,预期通过。
-- [ ] **Step 5:** `main.go`:用 `application.New` 注册 `AppService`;主窗口标题 `Tunnel`,默认 940×600,最小 720×460;`WindowClosing` 钩子取消关闭并隐藏窗口。托盘(`app.SystemTray.New()`)的菜单为「打开 Tunnel」「退出」;有转发开着时图标显示主题色点(可选)。检测不到托盘时(GNOME 下 `SystemTray` 创建失败或平台为 linux 且无 StatusNotifier),关闭窗口改为最小化。`Manager.OnChange` 中调用 `app.Event.Emit("state", st)`;窗口显示时调用 `Refresh(selected)`。`UpdateSettings` 改变 `LaunchAtLogin` 时调用 `autostart`。
+- [ ] **Step 5:** `main.go`:用 `application.New` 注册 `AppService`;主窗口标题 `Tunnel`,默认 940×600,最小 720×460;按 Global Constraints「窗口按钮的平台差异」配置:macOS 使用隐藏内嵌标题栏,Windows / Linux 使用原生标题栏;`WindowClosing` 钩子取消关闭并隐藏窗口。托盘(`app.SystemTray.New()`)的菜单为「打开 Tunnel」「退出」;有转发开着时图标显示主题色点(可选)。检测不到托盘时(GNOME 下 `SystemTray` 创建失败或平台为 linux 且无 StatusNotifier),关闭窗口改为最小化。`Manager.OnChange` 中调用 `app.Event.Emit("state", st)`;窗口显示时调用 `Refresh(selected)`。`UpdateSettings` 改变 `LaunchAtLogin` 时调用 `autostart`。
 - [ ] **Step 6:** 运行 `wails3 build`,预期成功;再运行 `wails3 generate bindings`,预期生成 `frontend/bindings/...`。手动打开 App,确认窗口出现、空状态正常,关闭后进程仍在、托盘「退出」可以退出。**不要打开共享开关,也不要打开「登录时启动」。**
 - [ ] **Step 7:** 记 CHANGELOG,提交 `feat(desktop): Wails 服务、窗口与托盘、登录时启动`。
 
@@ -402,6 +408,8 @@ type DeviceView struct {
   - `sidebar.test`:根据给定的 AppState 渲染服务器行,摘要为「已连接 1　在线 3」;`Conn=='waiting'` 时显示红点和「无法连接」,`Share.Phase=='failed'` 时显示红点(不显示「无法连接」),`disconnected` 时显示「已断开」;行内操作按钮有 aria-label(编辑、连接 / 断开、删除);点击行时调用 `Select`。
   - `settings.test`:选择深色后调用 `UpdateSettings`,参数中 `mode:"dark"`;5 个主题色按钮存在。
   - `dialog.test`:Esc 触发 onCancel,回车触发 onSubmit。
+  - `settings.test` 增加 `TestSettingsUpdatesInPlace`:打开设置后记下弹窗根节点的引用,依次点击「深色」、某个主题色、「English」,并推送新的 AppState;断言弹窗根节点仍是同一个 DOM 节点(没有重新挂载),进场动画类没有再次添加,`document.activeElement` 是刚点击的按钮。
+  - `platform.test`:`Platform=='darwin'` 时根元素有 `data-platform="darwin"`,侧栏顶部有为红绿灯留出的拖动区;`windows`、`linux` 时没有这个留白,页面中也没有任何自绘的窗口按钮。
 - [ ] **Step 3:** 运行 `npm test`,预期失败。
 - [ ] **Step 4:** 实现。`tokens.css` 中的颜色值逐字取自 Global Constraints,类名与结构参考原型 v12(`.app`、`.sidebar`、`.srv`、`.sa`、`.banner` 等)。服务器为零台时右栏显示 `EmptyState`(「添加第一台服务器」加主按钮)。左栏底部放「＋ 添加服务器」和设置齿轮(齿轮使用原型 v12 中的齿轮图标,不要用太阳图标)。
 - [ ] **Step 5:** 运行 `npm test` 与 `npx tsc --noEmit`,预期都通过。
