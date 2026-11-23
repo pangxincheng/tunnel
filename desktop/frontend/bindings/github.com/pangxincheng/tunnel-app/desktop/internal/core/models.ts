@@ -52,6 +52,17 @@ export interface ServerView {
     "host": string;
     "user": string;
     "port": number;
+    "key_path": string;
+
+    /**
+     * trusted host public key
+     */
+    "host_key": string;
+
+    /**
+     * empty = automatic
+     */
+    "socket_dir": string;
 
     /**
      * ready|connecting|waiting|failed|disconnected

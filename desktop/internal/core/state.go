@@ -23,7 +23,10 @@ type ServerView struct {
 	Host      string       `json:"host"`
 	User      string       `json:"user"`
 	Port      int          `json:"port"`
-	Conn      string       `json:"conn"` // ready|connecting|waiting|failed|disconnected
+	KeyPath   string       `json:"key_path"`
+	HostKey   string       `json:"host_key"`   // trusted host public key
+	SocketDir string       `json:"socket_dir"` // empty = automatic
+	Conn      string       `json:"conn"`       // ready|connecting|waiting|failed|disconnected
 	ConnErr   string       `json:"conn_err"`
 	RetryAt   time.Time    `json:"retry_at,omitzero"`   // set when Conn == "waiting"
 	DevicesAt time.Time    `json:"devices_at,omitzero"` // when the device list was fetched
@@ -79,6 +82,7 @@ func (m *Manager) State() AppState {
 
 func (m *Manager) serverViewLocked(sc *config.Server, s *server) ServerView {
 	v := ServerView{Name: sc.Name, Host: sc.Host, User: sc.User, Port: sc.Port,
+		KeyPath: sc.KeyPath, HostKey: sc.HostKey, SocketDir: sc.SocketDir,
 		DevicesAt: sc.DevicesAt, Devices: []DeviceView{}}
 	switch {
 	case sc.Disconnected:

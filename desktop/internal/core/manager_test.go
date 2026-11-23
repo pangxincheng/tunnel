@@ -688,3 +688,18 @@ func TestRefreshAfterStop(t *testing.T) {
 		t.Fatal("background work started after stop")
 	}
 }
+
+// The edit dialog needs the stored connection settings to prefill the form
+// and to keep the trusted host key when only the name changes.
+func TestServerViewCarriesConnectionSettings(t *testing.T) {
+	e := newEnv(t, nil)
+	sc := srvCfg("home")
+	sc.SocketDir = "/run/tunnel"
+	if err := e.m.AddServer(sc); err != nil {
+		t.Fatal(err)
+	}
+	v := e.view("home")
+	if v.KeyPath != "/k" || v.HostKey != "ssh-ed25519 AAA" || v.SocketDir != "/run/tunnel" {
+		t.Fatalf("view %+v", v)
+	}
+}

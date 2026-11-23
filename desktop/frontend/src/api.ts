@@ -48,6 +48,9 @@ function message(e: unknown): string {
   return String((e as { message?: unknown })?.message ?? e)
 }
 
+/** The full error message, code prefix included. */
+export const errorMessage = message
+
 /** Code prefix of a backend error ("" when the message has no known code). */
 export function errorCode(e: unknown): string {
   const m = message(e)

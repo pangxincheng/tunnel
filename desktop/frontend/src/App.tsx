@@ -5,6 +5,9 @@ import Sidebar from './components/Sidebar'
 import EmptyState from './components/EmptyState'
 import ServerDetail from './components/ServerDetail'
 import SettingsDialog from './components/SettingsDialog'
+import ServerDialog from './components/ServerDialog'
+import ConfirmDeleteDialog from './components/ConfirmDeleteDialog'
+import type { ServerView } from './api'
 
 function useSystemDark(): boolean {
   const mq = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: dark)') : null
@@ -23,6 +26,9 @@ export default function App() {
   const state = useAppState()
   const systemDark = useSystemDark()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // The edit form starts from a snapshot taken when it opens; state events never reset it.
+  const [serverForm, setServerForm] = useState<{ editing?: ServerView } | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
 
   const lang = state ? resolveLang(state.settings.lang, navigator.language) : null
   // t() reads the module-level language; set it before children render.
@@ -53,10 +59,13 @@ export default function App() {
   const servers = state.servers ?? []
   const current = servers.find((s) => s.name === state.selected) ?? servers[0]
 
-  // TODO(task 11): open the add / edit server dialog and the delete confirm.
-  const onAdd = () => {}
-  const onEdit = (_name: string) => {}
-  const onDelete = (_name: string) => {}
+  const onAdd = () => setServerForm({})
+  const onEdit = (name: string) => {
+    const sv = servers.find((s) => s.name === name)
+    if (sv) setServerForm({ editing: sv })
+  }
+  const onDelete = (name: string) => setDeleting(name)
+  const deletingServer = deleting ? servers.find((s) => s.name === deleting) : undefined
 
   return (
     <div className={dark ? 'app dark' : 'app'} data-accent={settings.accent} data-platform={state.platform}>
@@ -66,6 +75,14 @@ export default function App() {
         {current ? <ServerDetail key={current.name} server={current} platform={state.platform} sshd={state.sshd} /> : <EmptyState onAdd={onAdd} />}
       </section>
       {settingsOpen && <SettingsDialog settings={settings} onClose={() => setSettingsOpen(false)} />}
+      {serverForm && <ServerDialog servers={servers} editing={serverForm.editing} onClose={() => setServerForm(null)} />}
+      {deleting && (
+        <ConfirmDeleteDialog
+          name={deleting}
+          forwards={(deletingServer?.devices ?? []).filter((d) => d.on).length}
+          onClose={() => setDeleting(null)}
+        />
+      )}
     </div>
   )
 }
