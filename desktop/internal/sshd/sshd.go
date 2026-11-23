@@ -15,8 +15,8 @@ import (
 
 // Result is the detection outcome.
 type Result struct {
-	Running bool
-	Port    int
+	Running bool `json:"running"`
+	Port    int  `json:"port"`
 }
 
 // dial is replaceable in tests.

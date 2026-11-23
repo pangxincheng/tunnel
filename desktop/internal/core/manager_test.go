@@ -1,0 +1,487 @@
+package core
+
+import (
+	"errors"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/pangxincheng/tunnel-app/desktop/internal/config"
+	"github.com/pangxincheng/tunnel-app/desktop/internal/sharesvc"
+	"github.com/pangxincheng/tunnel-app/desktop/internal/sshd"
+	"github.com/pangxincheng/tunnel/tunnel"
+)
+
+func withForwards(s config.Server, fw map[string]config.Forward) config.Server {
+	s.Forwards = fw
+	return s
+}
+
+func withShare(s config.Server, on bool, name string) config.Server {
+	s.Share = config.ShareIntent{On: on, Name: name}
+	return s
+}
+
+func TestAddServerAllocatesPortsOnDevicesSeen(t *testing.T) {
+	e := newEnv(t, nil)
+	if err := e.m.AddServer(srvCfg("home")); err != nil {
+		t.Fatal(err)
+	}
+	s := e.ready("home", dev("b", "id-b", false), dev("a", "id-a", true))
+	if p := e.device("home", "a").Port; p != 5102 {
+		t.Fatalf("a port %d", p)
+	}
+	if p := e.device("home", "b").Port; p != 5103 {
+		t.Fatalf("b port %d", p)
+	}
+	s.setDevices(dev("a", "id-a", true), dev("b", "id-b", true))
+	e.refreshNow("home", s)
+	if e.device("home", "a").Port != 5102 || e.device("home", "b").Port != 5103 {
+		t.Fatal("ports changed on second refresh")
+	}
+	fw := e.cfgServer("home").Forwards
+	if fw["a"].Port != 5102 || fw["b"].Port != 5103 {
+		t.Fatalf("config forwards %+v", fw)
+	}
+	v := e.view("home")
+	if names := []string{v.Devices[0].Name, v.Devices[1].Name}; names[0] != "a" || names[1] != "b" {
+		t.Fatalf("not sorted: %v", names)
+	}
+	if v.DevicesAt.IsZero() || v.Online != 2 {
+		t.Fatalf("%+v", v)
+	}
+}
+
+func TestSetForwardPortBusy(t *testing.T) {
+	e := newEnv(t, cfgWith(srvCfg("home")))
+	s := e.ready("home", dev("a", "id-a", true))
+	s.setAddErr("a", &tunnel.LocalListenError{Addr: "127.0.0.1:5102", Cause: errors.New("in use")})
+	if err := e.m.SetForward("home", "a", true); err == nil {
+		t.Fatal("expected error")
+	}
+	d := e.device("home", "a")
+	if d.On || d.Err != "port_busy" {
+		t.Fatalf("%+v", d)
+	}
+	if e.cfgServer("home").Forwards["a"].On {
+		t.Fatal("persisted On")
+	}
+	s.setAddErr("a", nil)
+	if err := e.m.SetForward("home", "a", true); err != nil {
+		t.Fatal(err)
+	}
+	if d := e.device("home", "a"); !d.On || d.Err != "" {
+		t.Fatalf("%+v", d)
+	}
+}
+
+func TestSetForwardOfflineRejected(t *testing.T) {
+	e := newEnv(t, cfgWith(srvCfg("home")))
+	s := e.ready("home", dev("b", "id-b", false))
+	if err := e.m.SetForward("home", "b", true); !errors.Is(err, ErrDeviceOffline) {
+		t.Fatalf("got %v", err)
+	}
+	if len(s.Calls()) != 0 {
+		t.Fatalf("calls %v", s.Calls())
+	}
+	if err := e.m.SetForward("home", "zzz", true); !errors.Is(err, ErrUnknownDevice) {
+		t.Fatalf("got %v", err)
+	}
+	if err := e.m.SetForward("nope", "b", true); !errors.Is(err, ErrUnknownServer) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestForwardSurvivesDeviceOffline(t *testing.T) {
+	e := newEnv(t, cfgWith(srvCfg("home")))
+	s := e.ready("home", dev("a", "id-a", true))
+	if err := e.m.SetForward("home", "a", true); err != nil {
+		t.Fatal(err)
+	}
+	if v := e.view("home"); v.Connected != 1 {
+		t.Fatalf("connected %d", v.Connected)
+	}
+	s.setDevices(dev("a", "id-a", false))
+	e.refreshNow("home", s)
+	v := e.view("home")
+	if v.Connected != 0 || v.Online != 0 || !v.Devices[0].On {
+		t.Fatalf("%+v", v)
+	}
+	if contains(s.Calls(), "remove a") {
+		t.Fatal("RemoveForward called")
+	}
+}
+
+func TestConnectedCountsOnlyLive(t *testing.T) {
+	c := cfgWith(withForwards(srvCfg("home"), map[string]config.Forward{"c": {Port: 5200, On: true}}))
+	e := newEnv(t, c)
+	s := e.ready("home", dev("a", "id-a", true), dev("b", "id-b", true), dev("c", "id-c", false))
+	if err := e.m.SetForward("home", "a", true); err != nil {
+		t.Fatal(err)
+	}
+	v := e.view("home")
+	if v.Connected != 1 || v.Online != 2 || v.Conn != "ready" {
+		t.Fatalf("%+v", v)
+	}
+	s.setState(tunnel.ConnState{Phase: tunnel.PhaseWaiting, Err: "boom", RetryAt: t0})
+	v = e.view("home")
+	if v.Connected != 0 || v.Conn != "waiting" || v.ConnErr != "boom" || !v.RetryAt.Equal(t0) {
+		t.Fatalf("%+v", v)
+	}
+}
+
+func TestSetPortRestartsForward(t *testing.T) {
+	e := newEnv(t, cfgWith(srvCfg("home")))
+	s := e.ready("home", dev("a", "id-a", true), dev("b", "id-b", true))
+	if err := e.m.SetForward("home", "a", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.m.SetPort("home", "a", 6000); err != nil {
+		t.Fatal(err)
+	}
+	calls := strings.Join(s.Calls(), ",")
+	if !strings.HasSuffix(calls, "remove a,add a 6000") {
+		t.Fatalf("calls %s", calls)
+	}
+	if f := e.cfgServer("home").Forwards["a"]; f.Port != 6000 || !f.On {
+		t.Fatalf("%+v", f)
+	}
+	if err := e.m.SetPort("home", "a", 80); err == nil || e.device("home", "a").Err != "port_invalid" {
+		t.Fatalf("invalid: %v %+v", err, e.device("home", "a"))
+	}
+	if err := e.m.SetPort("home", "a", 5103); err == nil || e.device("home", "a").Err != "port_conflict" {
+		t.Fatalf("conflict: %v %+v", err, e.device("home", "a"))
+	}
+	if e.cfgServer("home").Forwards["a"].Port != 6000 {
+		t.Fatal("rejected port persisted")
+	}
+	// port change on an off forward: no session calls
+	n := len(s.Calls())
+	if err := e.m.SetPort("home", "b", 7000); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Calls()) != n {
+		t.Fatalf("calls %v", s.Calls())
+	}
+}
+
+func TestDisconnectPausesAndKeepsSwitches(t *testing.T) {
+	c := cfgWith(withShare(withForwards(srvCfg("home"), map[string]config.Forward{"a": {Port: 5102, On: true}}), true, "mac"))
+	e := newEnv(t, c, func(e *env) { e.share.installed("home", false, "mac") })
+	s1 := e.ready("home", dev("a", "id-a", true))
+	eventually(t, "running", s1.Running)
+	if err := e.m.SetConnected("home", false); err != nil {
+		t.Fatal(err)
+	}
+	if s1.Running() {
+		t.Fatal("session still running")
+	}
+	cs := e.cfgServer("home")
+	if !cs.Disconnected || !cs.Forwards["a"].On || !cs.Share.On {
+		t.Fatalf("%+v", cs)
+	}
+	if !contains(e.share.Calls(), "pause home") {
+		t.Fatalf("share calls %v", e.share.Calls())
+	}
+	v := e.view("home")
+	if v.Conn != "disconnected" || v.Connected != 0 || !v.Devices[0].On {
+		t.Fatalf("%+v", v)
+	}
+	if err := e.m.SetConnected("home", true); err != nil {
+		t.Fatal(err)
+	}
+	s2 := e.session("home", 2)
+	if !contains(s2.Calls(), "add a 5102") {
+		t.Fatalf("calls %v", s2.Calls())
+	}
+	if !contains(e.share.Calls(), "resume home") {
+		t.Fatalf("share calls %v", e.share.Calls())
+	}
+	if e.cfgServer("home").Disconnected {
+		t.Fatal("still disconnected")
+	}
+}
+
+func TestShareNameTaken(t *testing.T) {
+	e := newEnv(t, cfgWith(withShare(srvCfg("home"), false, "mac")))
+	e.ready("home", dev("mac", "other", true))
+	if err := e.m.SetShare("home", true); !errors.Is(err, ErrNameTaken) {
+		t.Fatalf("got %v", err)
+	}
+	if v := e.view("home"); v.Share.NameErr != "taken" || v.Share.On {
+		t.Fatalf("%+v", v.Share)
+	}
+	for _, c := range e.share.Calls() {
+		if strings.HasPrefix(c, "install") {
+			t.Fatal("install called")
+		}
+	}
+	// own device with the same name is fine
+	if err := e.m.SetShareName("home", "mac2"); err != nil {
+		t.Fatal(err)
+	}
+	if e.view("home").Share.NameErr != "" {
+		t.Fatal("NameErr not cleared")
+	}
+	if err := e.m.SetShareName("home", "-bad"); err == nil || e.view("home").Share.NameErr != "invalid" {
+		t.Fatalf("invalid name: %v", err)
+	}
+}
+
+func TestShareNoSSHD(t *testing.T) {
+	e := newEnv(t, cfgWith(withShare(srvCfg("home"), false, "mac")))
+	e.setSSHD(sshd.Result{})
+	if err := e.m.SetShare("home", true); !errors.Is(err, ErrNoSSHD) {
+		t.Fatalf("got %v", err)
+	}
+	if len(e.share.Calls()) != 0 || e.cfgServer("home").Share.On {
+		t.Fatalf("calls %v", e.share.Calls())
+	}
+	if e.m.State().SSHD.Running {
+		t.Fatal("sshd state not updated")
+	}
+}
+
+func TestShareInstallThenResume(t *testing.T) {
+	e := newEnv(t, cfgWith(withShare(srvCfg("home"), false, "mac")))
+	e.ready("home")
+	if err := e.m.SetShare("home", true); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.share.Calls(); len(got) != 1 || got[0] != "install home name=mac system=false local=22" {
+		t.Fatalf("calls %v", got)
+	}
+	e.waitView("home", "share ready", func(v ServerView) bool { return v.Share.Phase == "ready" && v.Share.On })
+	if v := e.view("home"); v.Share.LogPath != "/log/home" || v.Share.Busy {
+		t.Fatalf("%+v", v.Share)
+	}
+	if err := e.m.SetShare("home", false); err != nil {
+		t.Fatal(err)
+	}
+	e.waitView("home", "share paused", func(v ServerView) bool { return v.Share.Phase == "paused" && !v.Share.On })
+	if err := e.m.SetShare("home", true); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"install home name=mac system=false local=22", "pause home", "resume home"}
+	if got := e.share.Calls(); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("calls %v", got)
+	}
+	if !e.cfgServer("home").Share.On {
+		t.Fatal("not persisted")
+	}
+}
+
+func TestShareOutdated(t *testing.T) {
+	e := newEnv(t, cfgWith(withShare(srvCfg("home"), true, "mac")), func(e *env) {
+		e.share.installed("home", false, "mac")
+		e.share.svc["home"].version = "1.1.0"
+	})
+	e.waitView("home", "outdated", func(v ServerView) bool { return v.Share.Outdated })
+	if err := e.m.UpdateShare("home"); err != nil {
+		t.Fatal(err)
+	}
+	if !contains(e.share.Calls(), "install home name=mac system=false local=22") {
+		t.Fatalf("calls %v", e.share.Calls())
+	}
+	e.waitView("home", "not outdated", func(v ServerView) bool { return !v.Share.Outdated })
+}
+
+func TestSetShareSystemCancelled(t *testing.T) {
+	e := newEnv(t, cfgWith(withShare(srvCfg("home"), true, "mac")), func(e *env) {
+		e.share.installed("home", false, "mac")
+		e.share.installErrs = []error{sharesvc.ErrCancelled}
+	})
+	if err := e.m.SetShareSystem("home", true); !errors.Is(err, sharesvc.ErrCancelled) {
+		t.Fatalf("got %v", err)
+	}
+	want := []string{"uninstall home system=false", "install home name=mac system=true local=22", "install home name=mac system=false local=22"}
+	if got := e.share.Calls(); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("calls %v", got)
+	}
+	if cs := e.cfgServer("home"); cs.Share.System || !cs.Share.On {
+		t.Fatalf("%+v", cs.Share)
+	}
+	if e.view("home").Share.System {
+		t.Fatal("view System changed")
+	}
+	// success path
+	if err := e.m.SetShareSystem("home", true); err != nil {
+		t.Fatal(err)
+	}
+	if !e.cfgServer("home").Share.System {
+		t.Fatal("System not persisted")
+	}
+}
+
+func TestRenameServerMigratesShare(t *testing.T) {
+	c := cfgWith(withShare(withForwards(srvCfg("home"), map[string]config.Forward{"a": {Port: 5102, On: true}}), true, "mac"))
+	e := newEnv(t, c, func(e *env) { e.share.installed("home", false, "mac") })
+	s1 := e.session("home", 1)
+	ns := srvCfg("lab")
+	ns.Host = "home.example" // same connection params, new name
+	if err := e.m.UpdateServer("home", ns); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"uninstall home system=false", "install lab name=mac system=false local=22"}
+	if got := e.share.Calls(); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("calls %v", got)
+	}
+	cs := e.cfgServer("lab")
+	if !cs.Forwards["a"].On || !cs.Share.On || cs.Share.Name != "mac" {
+		t.Fatalf("%+v", cs)
+	}
+	if _, ok := e.cfg().Server("home"); ok {
+		t.Fatal("old name kept")
+	}
+	if s1.Running() {
+		t.Fatal("old session still running")
+	}
+	s2 := e.session("home", 2) // same host
+	if !contains(s2.Calls(), "add a 5102") {
+		t.Fatalf("calls %v", s2.Calls())
+	}
+	if err := e.m.UpdateServer("lab", srvCfg("-bad")); err == nil {
+		t.Fatal("invalid name accepted")
+	}
+}
+
+func TestDeleteServerUninstalls(t *testing.T) {
+	c := cfgWith(withShare(srvCfg("home"), true, "mac"), srvCfg("work"))
+	c.Selected = "home"
+	e := newEnv(t, c, func(e *env) { e.share.installed("home", true, "mac") })
+	s := e.session("home", 1)
+	eventually(t, "running", s.Running)
+	if err := e.m.DeleteServer("home"); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.share.Calls(); len(got) != 1 || got[0] != "uninstall home system=true" {
+		t.Fatalf("calls %v", got)
+	}
+	cc := e.cfg()
+	if _, ok := cc.Server("home"); ok || cc.Selected != "work" {
+		t.Fatalf("%+v", cc)
+	}
+	if s.Running() {
+		t.Fatal("session still running")
+	}
+	if len(e.m.State().Servers) != 1 {
+		t.Fatal("still in state")
+	}
+}
+
+func TestRestoreForwardsWhileUnreachable(t *testing.T) {
+	c := cfgWith(withForwards(srvCfg("home"), map[string]config.Forward{"a": {Port: 5102, On: true}}))
+	e := newEnv(t, c)
+	s := e.session("home", 1)
+	s.setState(tunnel.ConnState{Phase: tunnel.PhaseWaiting})
+	if !contains(s.Calls(), "add a 5102") {
+		t.Fatalf("calls %v", s.Calls())
+	}
+
+	c.Settings.RestoreForwards = false
+	e2 := newEnv(t, c)
+	s2 := e2.session("home", 1)
+	if len(s2.Calls()) != 0 {
+		t.Fatalf("calls %v", s2.Calls())
+	}
+	if e2.cfgServer("home").Forwards["a"].On {
+		t.Fatal("On kept")
+	}
+}
+
+func TestLastSeen(t *testing.T) {
+	e := newEnv(t, cfgWith(srvCfg("home")))
+	t1 := t0.Add(time.Hour)
+	e.clock.Set(t1)
+	s := e.ready("home", tunnel.Device{DeviceInfo: tunnel.DeviceInfo{Name: "a", DeviceID: "id-a", StartedAt: t0}, Online: true})
+	if ls := e.cfgServer("home").LastSeen["a"]; !ls.Equal(t1) {
+		t.Fatalf("last seen %v", ls)
+	}
+	e.clock.Set(t1.Add(time.Hour))
+	t3 := t1.Add(30 * time.Minute)
+	s.setDevices(
+		tunnel.Device{DeviceInfo: tunnel.DeviceInfo{Name: "a", DeviceID: "id-a", StartedAt: t0}},
+		tunnel.Device{DeviceInfo: tunnel.DeviceInfo{Name: "b", DeviceID: "id-b", StartedAt: t3}},
+	)
+	e.refreshNow("home", s)
+	if ls := e.device("home", "a").LastSeen; !ls.Equal(t1) {
+		t.Fatalf("a last seen %v", ls)
+	}
+	if ls := e.device("home", "b").LastSeen; !ls.Equal(t3) {
+		t.Fatalf("b last seen %v", ls)
+	}
+}
+
+func TestRefreshStopsWhenDisconnected(t *testing.T) {
+	e := newEnv(t, cfgWith(srvCfg("home")))
+	s := e.ready("home", dev("a", "id-a", true))
+	if err := e.m.SetConnected("home", false); err != nil {
+		t.Fatal(err)
+	}
+	n := s.DevCalls()
+	e.m.Refresh("home")
+	time.Sleep(60 * time.Millisecond)
+	if s.DevCalls() != n {
+		t.Fatalf("devices fetched after disconnect: %d -> %d", n, s.DevCalls())
+	}
+}
+
+func TestRefreshOnlyWhenReady(t *testing.T) {
+	e := newEnv(t, cfgWith(srvCfg("home")))
+	s := e.session("home", 1)
+	time.Sleep(40 * time.Millisecond)
+	if s.DevCalls() != 0 {
+		t.Fatal("devices fetched while connecting")
+	}
+}
+
+func TestOwnDeviceHidden(t *testing.T) {
+	e := newEnv(t, cfgWith(srvCfg("home")))
+	e.ready("home", dev("me", "self", true), dev("a", "id-a", true))
+	v := e.view("home")
+	if len(v.Devices) != 1 || v.Devices[0].Name != "a" || v.Online != 1 {
+		t.Fatalf("%+v", v)
+	}
+	if _, ok := e.cfgServer("home").Forwards["me"]; ok {
+		t.Fatal("port allocated for own device")
+	}
+}
+
+func TestOnChangeCoalesced(t *testing.T) {
+	e := newEnv(t, cfgWith(srvCfg("home")))
+	s := e.session("home", 1)
+	eventually(t, "first change", func() bool { e.mu.Lock(); defer e.mu.Unlock(); return e.changes > 0 })
+	e.mu.Lock()
+	start := e.changes
+	e.mu.Unlock()
+	for i := 0; i < 200; i++ {
+		s.setState(tunnel.ConnState{Phase: tunnel.PhaseConnecting, Attempt: i})
+	}
+	s.setState(tunnel.ConnState{Phase: tunnel.PhaseFailed, Err: "last"})
+	eventually(t, "latest delivered", func() bool {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		return len(e.lastSeen.Servers) == 1 && e.lastSeen.Servers[0].ConnErr == "last"
+	})
+	e.mu.Lock()
+	n := e.changes - start
+	e.mu.Unlock()
+	if n > 5 {
+		t.Fatalf("%d OnChange calls for one burst", n)
+	}
+}
+
+func TestConcurrentOps(t *testing.T) {
+	e := newEnv(t, cfgWith(withShare(srvCfg("home"), false, "mac"), srvCfg("work")))
+	e.ready("home", dev("a", "id-a", true), dev("b", "id-b", true))
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(4)
+		go func() { defer wg.Done(); _ = e.m.SetForward("home", "a", i%2 == 0) }()
+		go func() { defer wg.Done(); _ = e.m.SetShare("home", i%2 == 0) }()
+		go func() { defer wg.Done(); e.m.Refresh("home"); _ = e.m.State() }()
+		go func() { defer wg.Done(); _ = e.m.SetConnected("work", i%2 == 0) }()
+	}
+	wg.Wait()
+}
