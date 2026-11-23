@@ -62,7 +62,7 @@ export default function ServerDialog({ servers, editing, onClose }: Props) {
 
   const [probe, setProbe] = useState<Probe | null>(null)
   // Editing starts out trusted: the stored host key stays valid until a connection setting changes.
-  const [trusted, setTrusted] = useState(!!ed)
+  const [trusted, setTrusted] = useState(!!ed?.host_key)
   const [testing, setTesting] = useState(false)
   const [testErr, setTestErr] = useState('')
   const [saving, setSaving] = useState(false)

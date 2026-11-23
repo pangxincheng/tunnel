@@ -276,4 +276,15 @@ describe('Server dialog', () => {
     await user.type(screen.getByLabelText('私钥'), 'x')
     expect(screen.queryByText('dialog unavailable')).toBeNull()
   })
+
+  it('editing a server without a stored host key needs test + trust first', async () => {
+    apiMock.TestConnection.mockResolvedValue(probeOk)
+    const { user } = await open(appState({ servers: [server({ host_key: '' })], selected: 'home' }), 'edit')
+    expect(saveBtn().disabled).toBe(true)
+    await user.click(screen.getByRole('button', { name: '测试连接' }))
+    await user.click(await screen.findByRole('button', { name: '指纹一致,信任' }))
+    expect(saveBtn().disabled).toBe(false)
+    await user.click(saveBtn())
+    expect(apiMock.UpdateServer.mock.calls[0][1]).toMatchObject({ host_key: 'ssh-ed25519 AAAAnew' })
+  })
 })

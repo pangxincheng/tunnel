@@ -326,7 +326,6 @@ func (m *Manager) SetPort(server, device string, port int) error {
 	return addErr
 }
 
-// AddServer adds and (once started) connects a new server.
 // checkHostKey refuses a server without a parsable trusted host key, so a
 // connection can never fall back to accepting any key.
 func checkHostKey(hk string) error {
@@ -336,6 +335,7 @@ func checkHostKey(hk string) error {
 	return nil
 }
 
+// AddServer adds and (once started) connects a new server.
 func (m *Manager) AddServer(s config.Server) error {
 	if err := checkHostKey(s.HostKey); err != nil {
 		return err
