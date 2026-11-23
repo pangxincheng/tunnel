@@ -1,0 +1,32 @@
+import { vi } from 'vitest'
+import { act } from '@testing-library/react'
+
+const handlers = new Set<(s: any) => void>()
+
+export const apiMock = {
+  GetState: vi.fn(),
+  Select: vi.fn(async (_n: string) => {}),
+  SetConnected: vi.fn(async (_n: string, _on: boolean) => {}),
+  UpdateSettings: vi.fn(async (_s: any) => {}),
+  AppVersion: vi.fn(async () => '0.1.0'),
+  onState: vi.fn((cb: (s: any) => void) => {
+    handlers.add(cb)
+    return () => {
+      handlers.delete(cb)
+    }
+  }),
+  errorCode: vi.fn(() => ''),
+  errorDetail: vi.fn((e: unknown) => String(e)),
+}
+
+export function pushState(s: unknown) {
+  act(() => {
+    handlers.forEach((h) => h(s))
+  })
+}
+
+export function resetApiMock() {
+  handlers.clear()
+  for (const v of Object.values(apiMock)) (v as any).mockClear?.()
+  apiMock.AppVersion.mockImplementation(async () => '0.1.0')
+}

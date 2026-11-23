@@ -1,0 +1,22 @@
+:root {
+  --ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  --code: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
+.app {
+  --canvas: #F3F4F6; --side: #ECEEF1; --surface: #FFFFFF; --ink: #16191D; --muted: #6A717B; --faint: #9AA1AA; --line: #E1E4E8;
+  --fault: #B3422E; --fault-soft: #F8E9E5; --fault-ink: #7A2B1D;
+  --hover: rgba(22, 25, 29, .05); --sel: rgba(22, 25, 29, .07); --scrim: rgba(22, 25, 29, .28); --shadow: rgba(22, 25, 29, .12);
+}
+.app.dark {
+  --canvas: #1A1C20; --side: #15171A; --surface: #23262B; --ink: #E8EAED; --muted: #A0A7B0; --faint: #6E757E; --line: #2F3338;
+  --fault: #E06A52; --fault-soft: #3A221D; --fault-ink: #F3B3A6;
+  --hover: rgba(255, 255, 255, .04); --sel: rgba(255, 255, 255, .08); --scrim: rgba(0, 0, 0, .5); --shadow: rgba(0, 0, 0, .5);
+}
+
+.app[data-accent="green"] { --live: #13795B; }    .app.dark[data-accent="green"] { --live: #3DBE8B; }
+.app[data-accent="blue"] { --live: #2457D6; }     .app.dark[data-accent="blue"] { --live: #6E9BFF; }
+.app[data-accent="violet"] { --live: #6544E0; }   .app.dark[data-accent="violet"] { --live: #A592FF; }
+.app[data-accent="amber"] { --live: #A85A06; }    .app.dark[data-accent="amber"] { --live: #F0A24B; }
+.app[data-accent="graphite"] { --live: #3E4651; } .app.dark[data-accent="graphite"] { --live: #C9CFD7; }
+.app { --live-soft: color-mix(in srgb, var(--live) 14%, transparent); }
