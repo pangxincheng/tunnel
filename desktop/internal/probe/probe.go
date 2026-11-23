@@ -77,7 +77,6 @@ func Test(ctx context.Context, p Params) (Result, error) {
 			hostKey = key
 			return nil
 		},
-		Timeout: timeout,
 	}
 
 	addr := net.JoinHostPort(p.Host, strconv.Itoa(p.Port))
@@ -87,7 +86,9 @@ func Test(ctx context.Context, p Params) (Result, error) {
 		return res, &DialError{Err: err}
 	}
 	// 握手期间 ctx 取消或超时时关闭连接以中断。
+	// 保持到返回:连接后的 exec/sftp 同样受 ctx 与超时约束。
 	stop := context.AfterFunc(ctx, func() { conn.Close() })
+	defer stop()
 	sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, cfg)
 	if err != nil {
 		stop()
@@ -100,12 +101,14 @@ func Test(ctx context.Context, p Params) (Result, error) {
 		}
 		return res, &DialError{Err: err}
 	}
-	stop()
 	sc := ssh.NewClient(sshConn, chans, reqs)
 	defer sc.Close()
 
 	dir, err := tunnel.ResolveSocketDir(sc, p.SocketDir)
 	if err != nil {
+		if ctx.Err() != nil {
+			return res, &DialError{Err: ctx.Err()}
+		}
 		return res, &SocketDirError{Err: err}
 	}
 	return Result{

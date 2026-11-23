@@ -1,6 +1,7 @@
 package probe
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pangxincheng/tunnel/tunnel"
 	"golang.org/x/crypto/ssh"
@@ -20,6 +22,7 @@ type testServer struct {
 	ln      net.Listener
 	hostPub ssh.PublicKey
 	home    string
+	stall   chan struct{} // 非 nil 时 exec 不应答,直到关闭
 }
 
 func newSigner(t *testing.T) (ssh.Signer, ed25519.PrivateKey) {
@@ -66,11 +69,7 @@ func startServer(t *testing.T, authorized ssh.PublicKey) *testServer {
 		},
 	}
 	cfg.AddHostKey(hostSigner)
-	home, err := os.MkdirTemp("/tmp", "pr")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(home) })
+	home := t.TempDir()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -114,6 +113,10 @@ func (s *testServer) serve(c net.Conn, cfg *ssh.ServerConfig) {
 				}
 				var p struct{ Command string }
 				ssh.Unmarshal(r.Payload, &p)
+				if s.stall != nil {
+					<-s.stall
+					return
+				}
 				r.Reply(true, nil)
 				status := uint32(127)
 				if p.Command == tunnel.DefaultSocketDirCommand {
@@ -207,5 +210,23 @@ func TestProbeKeyFileMissing(t *testing.T) {
 	var de *DialError
 	if errors.As(err, &de) {
 		t.Fatalf("unexpected DialError: %v", err)
+	}
+}
+
+func TestProbeStalledExec(t *testing.T) {
+	cs, cpriv := newSigner(t)
+	srv := startServer(t, cs.PublicKey())
+	srv.stall = make(chan struct{})
+	t.Cleanup(func() { close(srv.stall) })
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := Test(ctx, srv.params(writeKey(t, cpriv, "")))
+	var de *DialError
+	if !errors.As(err, &de) {
+		t.Fatalf("err = %v (%T)", err, err)
+	}
+	if time.Since(start) > 3*time.Second {
+		t.Errorf("took %v", time.Since(start))
 	}
 }
