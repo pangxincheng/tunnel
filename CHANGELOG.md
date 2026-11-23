@@ -1,6 +1,7 @@
 # CHANGELOG
 
 ## 2026-11-23
+- 评审修正文档:spec §9 的 `--profile` 改为「不写时自动选择已安装的服务」、§7.1 macOS 侧栏顶部 46px 拖动区并给红绿灯留约 78px;README 清单补 Windows 任务计划程序 / 无控制台黑窗 / `tunnel.exe` 随包,以及暂停后重启仍保持暂停。
 - 新增 `desktop/README.md`:开发环境(Go、Node、`wails3` v3.1.0)、`wails3 task bundle:tunnel` / `dev` / `build` / `package`、测试(Go 测试前需先构建前端 `dist`;`npm test`、`npx tsc --noEmit`)、环境变量 `TUNNEL_APP_TUNNEL_BIN` / `TUNNEL_APP_CONFIG`、`go.mod` 的 replace(tunnel v1.3.0 打 tag 后去掉)、已知缺口(AppImage 未带 tunnel、无 universal 包、图形界面未经真机验证),以及三个系统的真机验证清单。
 - 同步一期设计文档:状态改为「已实现(桌面一期)」;服务名改为 `tunnel-<服务器名称>`、补 `--for-user`、`status --json` 的 `mode` 与退出码 3 / 4、`set-name`;Windows「登录后运行」改为任务计划程序;记录实现中的决定:Wails v3.1.0 与 React 18、共享开关关闭 = 暂停(仅删除服务器 / 切换运行方式才卸载)、设备列表持久化缓存、所有平台的应用菜单「退出」、macOS 隐藏式标题栏(红绿灯左上)与 Windows / Linux 系统标题栏(按钮右上)、设置原地更新、随包附带 tunnel CLI(AppImage 暂缺 [pending])、后端拒绝空 / 无效 `host_key`。
 - 修复编辑服务器(评审):已保存的 `host_key` 为空时(如手改配置),编辑弹窗不再默认视为已信任,需先测试连接并信任指纹才能保存(否则后端校验会拒绝仅改名称);`AddServer` 的文档注释移回函数上方。补测试。
