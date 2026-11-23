@@ -2,6 +2,7 @@
 
 ## 2026-11-23
 
+- tunnel-app 一期设计文档已同步:§6.4 / §9 服务名改为 `tunnel-<profile>`,并补充 `--for-user`、`status --json` 的 `mode` 与退出码 3 / 4、`set-name`(原 [pending] 已完成)。
 - `tunnel status --json` 运行中的输出在 `ShareStatus` 全部字段之外加 `"mode":"user"|"system"`;已安装但未运行时(退出码 3)`--json` 只输出 `{"installed":true,"running":false,"mode":"<mode>"}`;新增退出码 4 = 未安装(`--json` 输出 `{"installed":false}`),原先未安装为退出码 1(供 tunnel-app 判断安装 / 运行状态)。
 - 新增 `tunnel set-name NAME [--mode=MODE] [--profile=P]`:经控制通道发 `set-name` 不重装改设备名字,成功 0;名字不合法或被占用(`NameTakenError` 的信息输出到 stderr)退出码 1。
 - 不给 `--profile` 时自动选择:扫描 user / system 两种模式下已安装的 `tunnel-*` 服务,只有一个就选它,没有则按未安装处理,多个则报「已安装多个服务(…),请用 --profile 指定」(同一 profile 在两种模式都有时仍提示用 `--mode`);`resolveTarget` 找不到服务时返回哨兵错误 `errNotInstalled`。此前不给 `--profile` 固定取 `default`。
@@ -14,7 +15,6 @@
 - 安装用户解析(终审 I4):`tunnel install` 新增 `--for-user=USERNAME`(只用于 `--mode system`);安装用户(VPS 用户默认值、`~` 展开、家目录、控制通道属主)按 `--for-user` → `SUDO_USER` / `SUDO_UID` → 当前用户确定,用户名、UID、家目录取自同一用户(用户查询可注入测试);`status` 等命令同样按 `SUDO_*` 定位安装用户的家目录。
 - Windows 任务(终审 I5 / I6):任务 XML 的 `LogonTrigger` 与 `Principal` 都写入当前账户 `<UserId>DOMAIN\user</UserId>`(`Spec.User`,来自 `os/user`),交互令牌、最低权限,普通用户可注册;`BinPath` 改为每个服务一份 `%LOCALAPPDATA%\tunnel\<服务名>\tunnel.exe`,`Manager` 新增 `Stop`(Windows `schtasks /End`,其他平台无操作),install 复制二进制前先结束本服务的任务(忽略错误)。
 - README / `tunnel.toml.example`(终审 M6):卸载说明改为「Linux journal 与 macOS system 日志保留,macOS user 与 Windows 日志随配置目录删除」;示例配置注释掉 `remote_listen_port`(install 只支持 name);补充 `--for-user`、每个 profile 一个服务 `tunnel-<profile>`、控制通道位置与真机验证中的普通用户安装检查。
-- [pending] tunnel-app: 设计文档 §6.4/§9 服务名改为 tunnel-<profile>,并补充 --for-user
 - 修复睡眠唤醒后半开连接长时间停在 ready(终审 I1):共用的 `keepalive` 在 2×间隔内收不到回复即关闭连接(Client / Session / Share 都受益,检测上限约 3×keepalive 间隔);`RetryNow()` / `Share.Retry()` 在 ready 时强制断开当前连接并立即重连、重置退避(Share 此时跳过需要对端回复的远端监听撤销,不会卡 2 秒)。测试服务器新增 `IgnoreKeepalive`(TCP 不断、keepalive 不回复)。
 - user 模式控制通道目录加固(终审 I2):`ControlListen(addr, -1)` 要求父目录属于当前用户、权限恰为 0700 且不是符号链接(缺失时以 0700 创建),否则报错拒绝监听,防止 `/tmp` 下被其他本机用户预先占位。
 - `ListDevices` 在 ctx 取消时返回 `ctx.Err()`,不再返回「全部离线」且 err 为 nil(终审 M1);`Device.Online` 的 JSON 键改为 `online`(终审 M2,其余跨控制通道 / JSON 的导出结构已核对均有 snake_case 标签)。
