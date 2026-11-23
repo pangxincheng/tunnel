@@ -291,8 +291,11 @@ type env struct {
 	cancel                   context.CancelFunc
 }
 
+// validHostKey is a parsable authorized_keys line (a fixed ed25519 public key).
+const validHostKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
+
 func srvCfg(name string) config.Server {
-	return config.Server{Name: name, Host: name + ".example", User: "u", KeyPath: "/k", HostKey: "ssh-ed25519 AAA", Port: 22}
+	return config.Server{Name: name, Host: name + ".example", User: "u", KeyPath: "/k", HostKey: validHostKey, Port: 22}
 }
 
 func dev(name, id string, online bool) tunnel.Device {

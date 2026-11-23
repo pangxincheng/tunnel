@@ -177,7 +177,8 @@ func TestServiceMethodErrorsAreCoded(t *testing.T) {
 
 func TestOpenLogJournalAndMissing(t *testing.T) {
 	s, _ := newTestService(t)
-	if err := s.AddServer(config.Server{Name: "home", Host: "h", User: "u", KeyPath: "/k", Port: 22, Disconnected: true}); err != nil {
+	if err := s.AddServer(config.Server{Name: "home", Host: "h", User: "u", KeyPath: "/k", Port: 22, Disconnected: true,
+		HostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.OpenLog("nope"); err == nil || !strings.HasPrefix(err.Error(), "unknown:") {

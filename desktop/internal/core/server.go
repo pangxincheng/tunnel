@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
 	"github.com/pangxincheng/tunnel-app/desktop/internal/config"
 	"github.com/pangxincheng/tunnel-app/desktop/internal/sharesvc"
 	"github.com/pangxincheng/tunnel/tunnel"
@@ -325,7 +327,19 @@ func (m *Manager) SetPort(server, device string, port int) error {
 }
 
 // AddServer adds and (once started) connects a new server.
+// checkHostKey refuses a server without a parsable trusted host key, so a
+// connection can never fall back to accepting any key.
+func checkHostKey(hk string) error {
+	if _, _, _, _, err := ssh.ParseAuthorizedKey([]byte(hk)); err != nil {
+		return fmt.Errorf("host_key 无效(需要先测试连接并信任指纹): %w", err)
+	}
+	return nil
+}
+
 func (m *Manager) AddServer(s config.Server) error {
+	if err := checkHostKey(s.HostKey); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.notify()
 	defer m.mu.Unlock()
@@ -361,6 +375,9 @@ func connParamsChanged(a, b *config.Server) bool {
 // forwards, last-seen times and share intent. A rename or changed connection
 // restarts the Session and reinstalls an installed share service.
 func (m *Manager) UpdateServer(oldName string, ns config.Server) error {
+	if err := checkHostKey(ns.HostKey); err != nil {
+		return err
+	}
 	s, err := m.lockOp(oldName)
 	if err != nil {
 		return err

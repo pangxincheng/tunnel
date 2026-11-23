@@ -699,7 +699,38 @@ func TestServerViewCarriesConnectionSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	v := e.view("home")
-	if v.KeyPath != "/k" || v.HostKey != "ssh-ed25519 AAA" || v.SocketDir != "/run/tunnel" {
+	if v.KeyPath != "/k" || v.HostKey != validHostKey || v.SocketDir != "/run/tunnel" {
 		t.Fatalf("view %+v", v)
+	}
+}
+
+func TestAddServerRejectsBadHostKey(t *testing.T) {
+	for _, hk := range []string{"", "   ", "ssh-ed25519 AAA", "not a key"} {
+		e := newEnv(t, nil)
+		sc := srvCfg("home")
+		sc.HostKey = hk
+		if err := e.m.AddServer(sc); err == nil || !strings.Contains(err.Error(), "host_key") {
+			t.Fatalf("host_key %q: err %v", hk, err)
+		}
+		if len(e.m.State().Servers) != 0 {
+			t.Fatalf("host_key %q: server was added", hk)
+		}
+	}
+}
+
+func TestUpdateServerRejectsBadHostKey(t *testing.T) {
+	e := newEnv(t, nil)
+	if err := e.m.AddServer(srvCfg("home")); err != nil {
+		t.Fatal(err)
+	}
+	for _, hk := range []string{"", "ssh-ed25519 AAA", "not a key"} {
+		ns := srvCfg("home")
+		ns.HostKey = hk
+		if err := e.m.UpdateServer("home", ns); err == nil || !strings.Contains(err.Error(), "host_key") {
+			t.Fatalf("host_key %q: err %v", hk, err)
+		}
+	}
+	if got := e.cfgServer("home").HostKey; got != validHostKey {
+		t.Fatalf("stored host key changed: %q", got)
 	}
 }

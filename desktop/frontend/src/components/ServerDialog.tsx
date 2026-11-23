@@ -67,6 +67,7 @@ export default function ServerDialog({ servers, editing, onClose }: Props) {
   const [testErr, setTestErr] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveErr, setSaveErr] = useState('')
+  const [pickErr, setPickErr] = useState('')
   const testSeq = useRef(0)
   const nameRef = useRef<HTMLInputElement>(null)
   const hostRef = useRef<HTMLInputElement>(null)
@@ -91,11 +92,12 @@ export default function ServerDialog({ servers, editing, onClose }: Props) {
   }
 
   async function pickKey() {
+    setPickErr('')
     try {
       const p = await PickKeyFile()
       if (p) conn(setKeyPath)(p)
     } catch (e) {
-      console.error(e)
+      setPickErr(errorMessage(e))
     }
   }
 
@@ -211,11 +213,16 @@ export default function ServerDialog({ servers, editing, onClose }: Props) {
           <input id="sd-user" className="inp" value={user} onChange={(e) => conn(setUser)(e.target.value)} />
         </Field>
         <Field id="sd-key" label={t('fieldKey')}>
-          <input id="sd-key" className="inp" value={keyPath} onChange={(e) => conn(setKeyPath)(e.target.value)} />
+          <input id="sd-key" className="inp" value={keyPath} onChange={(e) => {
+              setPickErr('')
+              conn(setKeyPath)(e.target.value)
+            }}
+          />
           <button type="button" className="btn plain sm" onClick={() => void pickKey()}>
             {t('pickKey')}
           </button>
         </Field>
+        {pickErr && <div className="fld-err">{pickErr}</div>}
         <button type="button" className="adv-toggle" aria-expanded={advanced} onClick={() => setAdvanced((v) => !v)}>
           {t('advanced')}
         </button>

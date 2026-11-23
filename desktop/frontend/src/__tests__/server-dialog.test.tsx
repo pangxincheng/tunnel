@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, within, waitFor } from '@testing-library/react'
+import { render, screen, within, waitFor, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { apiMock, resetApiMock, pushState } from './apiMock'
 import { appState, server } from './fixtures'
@@ -218,5 +218,62 @@ describe('Server dialog', () => {
     pushState({ ...base(), servers: [server({ connected: 2 })] })
     expect(screen.getByRole('dialog')).toBe(dlg)
     expect((screen.getByLabelText('名称') as HTMLInputElement).value).toBe('work')
+  })
+
+  it('a test that finishes after the host changed is ignored', async () => {
+    let resolve!: (v: typeof probeOk) => void
+    apiMock.TestConnection.mockImplementation(() => new Promise((r) => (resolve = r)) as any)
+    const { user } = await open()
+    await fillAdd(user)
+    await user.click(screen.getByRole('button', { name: '测试连接' }))
+    expect(screen.getByRole('button', { name: '正在测试…' })).toBeTruthy()
+    await user.type(screen.getByLabelText('地址'), 'x')
+    // the stale test no longer blocks the button
+    expect((screen.getByRole('button', { name: '测试连接' }) as HTMLButtonElement).disabled).toBe(false)
+    await act(async () => resolve(probeOk))
+    expect(screen.queryByText(FP)).toBeNull()
+    expect(screen.queryByRole('button', { name: '指纹一致,信任' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '正在测试…' })).toBeNull()
+    expect(saveBtn().disabled).toBe(true)
+  })
+
+  it('a late failure of a stale test shows no error either', async () => {
+    let reject!: (e: Error) => void
+    apiMock.TestConnection.mockImplementation(() => new Promise((_, r) => (reject = r)) as any)
+    const { user } = await open()
+    await fillAdd(user)
+    await user.click(screen.getByRole('button', { name: '测试连接' }))
+    await user.type(screen.getByLabelText('地址'), 'x')
+    await act(async () => reject(new Error('auth: nope')))
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('editing: changing the socket directory drops trust', async () => {
+    const { user } = await open(base(), 'edit')
+    expect(saveBtn().disabled).toBe(false)
+    await user.click(screen.getByRole('button', { name: '高级' }))
+    await user.type(screen.getByLabelText('socket 目录'), '/run/x')
+    expect(saveBtn().disabled).toBe(true)
+  })
+
+  it('editing: picking a different key drops trust', async () => {
+    apiMock.PickKeyFile.mockResolvedValueOnce('/picked/other')
+    const { user } = await open(base(), 'edit')
+    expect(saveBtn().disabled).toBe(false)
+    await user.click(screen.getByRole('button', { name: '选择…' }))
+    await waitFor(() => expect((screen.getByLabelText('私钥') as HTMLInputElement).value).toBe('/picked/other'))
+    expect(saveBtn().disabled).toBe(true)
+  })
+
+  it('a failing key picker shows its message under the key field', async () => {
+    apiMock.PickKeyFile.mockRejectedValueOnce(new Error('dialog unavailable'))
+    const { user } = await open()
+    await fillAdd(user)
+    await user.click(screen.getByRole('button', { name: '选择…' }))
+    const msg = await screen.findByText('dialog unavailable')
+    expect(msg.className).toContain('fld-err')
+    expect((screen.getByLabelText('私钥') as HTMLInputElement).value).toBe('/k/id')
+    await user.type(screen.getByLabelText('私钥'), 'x')
+    expect(screen.queryByText('dialog unavailable')).toBeNull()
   })
 })
