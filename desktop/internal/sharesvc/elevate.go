@@ -48,7 +48,7 @@ func (s *Service) elevated(ctx context.Context, what string, args []string) erro
 	if exit == 0 {
 		return nil
 	}
-	if s.goos == "darwin" && strings.Contains(string(errOut), "-128") {
+	if s.goos == "darwin" && strings.Contains(string(errOut), "(-128)") {
 		return ErrCancelled
 	}
 	if s.goos == "linux" && (exit == 126 || exit == 127) {

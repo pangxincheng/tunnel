@@ -3,6 +3,7 @@ package sharesvc
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -243,5 +244,78 @@ func TestLogPath(t *testing.T) {
 	}
 	if got := New("t", nil, "linux", "a").LogPath("p", true); got != "" {
 		t.Error(got)
+	}
+}
+
+func TestExecRunnerCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _, _, err := ExecRunner{}.Run(ctx, os.Args[0], "-test.run=^$")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestExecRunnerRunsInEmptyTempDir(t *testing.T) {
+	// the test binary re-executed with -test.run=^$ exits 0 and ignores cwd; just prove the happy path
+	_, _, exit, err := ExecRunner{}.Run(context.Background(), os.Args[0], "-test.run=^$")
+	if err != nil || exit != 0 {
+		t.Fatalf("exit=%d err=%v", exit, err)
+	}
+}
+
+func TestInvalidInputNeverRunsCLI(t *testing.T) {
+	ctx := context.Background()
+	r := &fakeRunner{}
+	s := New("t", r, "linux", "alice")
+	bad := []error{
+		s.SetName(ctx, "home", "-h"),
+		s.SetName(ctx, "../x", "ok"),
+		s.Pause(ctx, "../x"),
+		s.Resume(ctx, "../x"),
+		s.Retry(ctx, "../x"),
+		s.Uninstall(ctx, "../x", false),
+		s.Uninstall(ctx, "../x", true),
+	}
+	_, err := s.Status(ctx, "../x")
+	bad = append(bad, err)
+	o := opts()
+	o.Profile = "../x"
+	bad = append(bad, s.Install(ctx, o))
+	o = opts()
+	o.Name = "-bad"
+	bad = append(bad, s.Install(ctx, o))
+	for i, e := range bad {
+		if e == nil {
+			t.Errorf("case %d: want error", i)
+		}
+	}
+	if len(r.calls) != 0 {
+		t.Fatalf("runner called: %+v", r.calls)
+	}
+}
+
+func TestSystemRequiresCurrentUser(t *testing.T) {
+	r := &fakeRunner{}
+	s := New("t", r, "linux", "")
+	o := opts()
+	o.System = true
+	if err := s.Install(context.Background(), o); err == nil {
+		t.Error("install: want error")
+	}
+	if err := s.Uninstall(context.Background(), "p", true); err == nil {
+		t.Error("uninstall: want error")
+	}
+	if len(r.calls) != 0 {
+		t.Fatalf("calls = %+v", r.calls)
+	}
+}
+
+func TestOsascriptCancelMarkerIsExact(t *testing.T) {
+	o := opts()
+	o.System = true
+	r := &fakeRunner{exit: 1, stderr: "failed with code -1280 something"}
+	if err := New("t", r, "darwin", "a").Install(context.Background(), o); errors.Is(err, ErrCancelled) {
+		t.Fatal("bare -128 substring must not mean cancelled")
 	}
 }

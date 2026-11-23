@@ -34,9 +34,13 @@ func (ExecRunner) Run(ctx context.Context, name string, args ...string) ([]byte,
 	defer os.RemoveAll(dir)
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
+	hideWindow(cmd)
 	var so, se bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &so, &se
 	err = cmd.Run()
+	if cerr := ctx.Err(); cerr != nil {
+		return so.Bytes(), se.Bytes(), -1, cerr
+	}
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
 		return so.Bytes(), se.Bytes(), ee.ExitCode(), nil
@@ -100,6 +104,9 @@ func cliError(what string, exit int, stderr []byte) error {
 
 // Status 查询共享服务状态。
 func (s *Service) Status(ctx context.Context, profile string) (State, error) {
+	if err := validateProfile(profile); err != nil {
+		return State{}, err
+	}
 	out, errOut, exit, err := s.runner.Run(ctx, s.bin, "status", "--json", "--profile", profile)
 	if err != nil {
 		return State{}, err
@@ -124,6 +131,13 @@ func (s *Service) Status(ctx context.Context, profile string) (State, error) {
 	return State{}, cliError("tunnel status", exit, errOut)
 }
 
+func validateProfile(p string) error {
+	if err := tunnel.ValidateName(p); err != nil {
+		return fmt.Errorf("invalid profile: %w", err)
+	}
+	return nil
+}
+
 func (s *Service) simple(ctx context.Context, what string, args ...string) error {
 	_, errOut, exit, err := s.runner.Run(ctx, s.bin, args...)
 	if err != nil {
@@ -136,23 +150,47 @@ func (s *Service) simple(ctx context.Context, what string, args ...string) error
 }
 
 func (s *Service) Pause(ctx context.Context, profile string) error {
+	if err := validateProfile(profile); err != nil {
+		return err
+	}
 	return s.simple(ctx, "tunnel pause", "pause", "--profile", profile)
 }
 
 func (s *Service) Resume(ctx context.Context, profile string) error {
+	if err := validateProfile(profile); err != nil {
+		return err
+	}
 	return s.simple(ctx, "tunnel resume", "resume", "--profile", profile)
 }
 
 func (s *Service) Retry(ctx context.Context, profile string) error {
+	if err := validateProfile(profile); err != nil {
+		return err
+	}
 	return s.simple(ctx, "tunnel retry", "retry", "--profile", profile)
 }
 
 func (s *Service) SetName(ctx context.Context, profile, name string) error {
+	if err := validateProfile(profile); err != nil {
+		return err
+	}
+	if err := tunnel.ValidateName(name); err != nil {
+		return fmt.Errorf("invalid name: %w", err)
+	}
 	return s.simple(ctx, "tunnel set-name", "set-name", name, "--profile", profile)
 }
 
 // Install 安装并启动共享服务;System 时经系统授权提权。
 func (s *Service) Install(ctx context.Context, o InstallOpts) error {
+	if err := validateProfile(o.Profile); err != nil {
+		return err
+	}
+	if err := tunnel.ValidateName(o.Name); err != nil {
+		return fmt.Errorf("invalid name: %w", err)
+	}
+	if o.System && s.currentUser == "" {
+		return errors.New("system mode requires the current user name")
+	}
 	mode := "user"
 	if o.System {
 		mode = "system"
@@ -173,6 +211,12 @@ func (s *Service) Install(ctx context.Context, o InstallOpts) error {
 
 // Uninstall 卸载共享服务;system 时经系统授权提权。
 func (s *Service) Uninstall(ctx context.Context, profile string, system bool) error {
+	if err := validateProfile(profile); err != nil {
+		return err
+	}
+	if system && s.currentUser == "" {
+		return errors.New("system mode requires the current user name")
+	}
 	if system {
 		return s.elevated(ctx, "tunnel uninstall", []string{"uninstall", "--mode", "system", "--profile", profile})
 	}
