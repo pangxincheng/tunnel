@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, act } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { render, screen, act, fireEvent } from '@testing-library/react'
 import { apiMock, resetApiMock } from './apiMock'
 import { server } from './fixtures'
 import { setLang } from '../i18n'
@@ -8,39 +7,57 @@ import Banner from '../components/Banner'
 
 vi.mock('../api', async () => (await import('./apiMock')).apiMock)
 
+const NOW = Date.parse('2026-11-23T10:00:00Z')
+const iso = (offsetMs: number) => new Date(NOW + offsetMs).toISOString()
+
 describe('Banner', () => {
   beforeEach(() => {
     resetApiMock()
     setLang('zh')
+    vi.useFakeTimers({ now: NOW })
   })
   afterEach(() => vi.useRealTimers())
 
-  it('waiting: reason, list age, countdown and retry now', async () => {
-    const now = Date.now()
+  it('waiting: the spec sentence, countdown and retry now', () => {
     const { container } = render(
       <Banner
         server={server({
           conn: 'waiting',
           conn_err: 'connection timed out',
-          devices_at: new Date(now - 5 * 60_000 - 10_000).toISOString(),
-          retry_at: new Date(now + 7_500).toISOString(),
+          devices_at: iso(-5 * 60_000 - 10_000),
+          retry_at: iso(7_500),
         })}
       />,
     )
-    expect(container.textContent).toBe('无法连接 home:connection timed out设备列表是 5 分钟前的。 8 秒后重试立即重试')
-    await userEvent.click(screen.getByText('立即重试'))
+    expect(container.textContent).toBe('无法连接 home:connection timed out。设备列表是 5 分钟前的。 8 秒后重试立即重试')
+    fireEvent.click(screen.getByText('立即重试'))
     expect(apiMock.Retry).toHaveBeenCalledWith('home')
   })
 
+  it('English sentence punctuation', () => {
+    setLang('en')
+    const { container } = render(
+      <Banner server={server({ conn: 'waiting', conn_err: 'timed out', devices_at: iso(-5 * 60_000), retry_at: iso(3000) })} />,
+    )
+    expect(container.textContent).toBe('Can’t reach home: timed out.The device list is 5 min old. Retrying in 3sRetry now')
+  })
+
   it('countdown ticks by itself', () => {
-    vi.useFakeTimers()
-    const at = new Date(Date.now() + 3_000).toISOString()
-    render(<Banner server={server({ conn: 'waiting', retry_at: at })} />)
+    render(<Banner server={server({ conn: 'waiting', retry_at: iso(3_000) })} />)
     expect(screen.getByText('3 秒后重试')).toBeTruthy()
     act(() => {
       vi.advanceTimersByTime(2000)
     })
     expect(screen.getByText('1 秒后重试')).toBeTruthy()
+  })
+
+  it('the list age refreshes on the shared clock without a state change', () => {
+    render(<Banner server={server({ conn: 'failed', conn_err: 'x', devices_at: iso(-60_000) })} />)
+    expect(screen.getByText(/设备列表是 1 分钟前的/)).toBeTruthy()
+    act(() => {
+      vi.advanceTimersByTime(90_000)
+    })
+    expect(screen.getByText(/设备列表是 2 分钟前的/)).toBeTruthy()
   })
 
   it('failed: no countdown', () => {
@@ -49,11 +66,11 @@ describe('Banner', () => {
     expect(screen.queryByText(/秒后重试/)).toBeNull()
   })
 
-  it('disconnected: grey banner with 连接', async () => {
+  it('disconnected: grey banner with 连接', () => {
     const { container } = render(<Banner server={server({ conn: 'disconnected' })} />)
     expect(container.querySelector('.banner.paused')).toBeTruthy()
     expect(screen.getByText('已断开 home:共享和转发都已停止,开关状态会保留')).toBeTruthy()
-    await userEvent.click(screen.getByText('连接'))
+    fireEvent.click(screen.getByText('连接'))
     expect(apiMock.SetConnected).toHaveBeenCalledWith('home', true)
   })
 

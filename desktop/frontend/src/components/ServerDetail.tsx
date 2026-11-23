@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ServerView } from '../api'
 import { t } from '../i18n'
 import Banner from './Banner'
@@ -18,6 +18,10 @@ export default function ServerDetail({ server, platform, sshd }: Props) {
   const stale = server.conn === 'waiting' || server.conn === 'failed'
   const devices = server.devices ?? []
   const cmdsDevice = cmdsFor ? devices.find((d) => d.name === cmdsFor) : undefined
+  // forget the device once it is gone, so it cannot pop the dialog open when it returns
+  useEffect(() => {
+    if (cmdsFor && !cmdsDevice) setCmdsFor(null)
+  }, [cmdsFor, cmdsDevice])
 
   return (
     <>

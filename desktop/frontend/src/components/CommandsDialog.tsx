@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef } from 'react'
 import { t } from '../i18n'
 import { commandsFor } from '../commands'
+import { useCopy } from '../clipboard'
 import Dialog from './Dialog'
 
 interface Props {
@@ -29,19 +30,7 @@ function Cmd({ text }: { text: string }) {
 
 export default function CommandsDialog({ name, port, forwardOn, onClose }: Props) {
   const doneRef = useRef<HTMLButtonElement>(null)
-  const [copied, setCopied] = useState<number | null>(null)
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
-  useEffect(() => () => clearTimeout(timer.current), [])
-
-  const copy = (i: number, text: string) => {
-    Promise.resolve(navigator.clipboard?.writeText(text))
-      .then(() => {
-        setCopied(i)
-        clearTimeout(timer.current)
-        timer.current = setTimeout(() => setCopied(null), 1500)
-      })
-      .catch((e) => console.error('clipboard write failed', e))
-  }
+  const [result, copy] = useCopy()
 
   return (
     <Dialog
@@ -58,12 +47,12 @@ export default function CommandsDialog({ name, port, forwardOn, onClose }: Props
       }
     >
       <div className="list cmdlist">
-        {commandsFor(port).map((c, i) => (
+        {commandsFor(port).map((c) => (
           <div className="c" key={c.key}>
             <span className="k">{t(c.key)}</span>
             <Cmd text={c.text} />
-            <button type="button" className="lb" aria-label={`${t('copyCmd')} ${t(c.key)}`} onClick={() => copy(i, c.text)}>
-              {copied === i ? t('copied') : t('copyCmd')}
+            <button type="button" className="lb" aria-label={`${t('copyCmd')} ${t(c.key)}`} onClick={() => copy(c.key, c.text)}>
+              {result?.id === c.key ? (result.ok ? t('copied') : t('copyFailed')) : t('copyCmd')}
             </button>
           </div>
         ))}

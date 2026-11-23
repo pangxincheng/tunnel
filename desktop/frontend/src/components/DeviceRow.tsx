@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { SetForward, SetPort, errorCode, errorDetail, type DeviceView, type ServerView } from '../api'
 import { t } from '../i18n'
 import { osLabel, since } from '../format'
+import { useNow } from '../useNow'
 import Switch from './Switch'
 import PortField from './PortField'
 import { CopyIcon } from './icons'
@@ -25,17 +26,18 @@ export default function DeviceRow({ server, device, disabled, onCommands }: Prop
   const [localErr, setLocalErr] = useState('')
   const [attempt, setAttempt] = useState(device.port)
   const [busy, setBusy] = useState(false)
+  const now = useNow()
 
   const live = device.on && device.online && server.conn === 'ready'
   const sys = osLabel(device.os, device.os_version)
   let status: string
   if (device.online) {
-    const up = since(device.started_at)
+    const up = since(device.started_at, now)
     status = up ? `${sys}  ${t('devOnline', { d: up })}` : sys
   } else if (device.on) {
     status = t('devOfflineKept')
   } else {
-    const seen = since(device.last_seen)
+    const seen = since(device.last_seen, now)
     status = seen ? t('devOffline', { d: seen }) : t('devOfflineNoSeen')
   }
 
@@ -43,11 +45,10 @@ export default function DeviceRow({ server, device, disabled, onCommands }: Prop
 
   const reject = (e: unknown, port: number) => {
     const code = errorCode(e)
-    const raw = String((e as { message?: unknown })?.message ?? e)
-    if (code === 'port_busy' || raw.includes('port_busy')) setLocalErr(t('portBusy', { port }))
+    if (code === 'port_busy') setLocalErr(t('portBusy', { port }))
     else if (code === 'offline') setLocalErr(t('deviceOffline', { name: device.name }))
-    else if (raw.includes('port_invalid')) setLocalErr(t('portInvalid'))
-    else if (raw.includes('port_conflict')) setLocalErr(t('portConflict', { port }))
+    else if (code === 'port_invalid') setLocalErr(t('portInvalid'))
+    else if (code === 'port_conflict') setLocalErr(t('portConflict', { port }))
     else setLocalErr(errorDetail(e))
   }
 

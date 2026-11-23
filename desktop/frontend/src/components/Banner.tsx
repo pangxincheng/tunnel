@@ -1,10 +1,12 @@
 import { Retry, SetConnected, type ServerView } from '../api'
 import { t } from '../i18n'
 import { since } from '../format'
+import { useNow } from '../useNow'
 import Countdown from './Countdown'
 
 /** Status banner for a server that is unreachable or disconnected; nothing otherwise. */
 export default function Banner({ server }: { server: ServerView }) {
+  const now = useNow()
   if (server.conn === 'disconnected') {
     return (
       <div className="banner paused" role="status">
@@ -23,7 +25,7 @@ export default function Banner({ server }: { server: ServerView }) {
     )
   }
   if (server.conn !== 'waiting' && server.conn !== 'failed') return null
-  const ago = since(server.devices_at)
+  const ago = since(server.devices_at, now)
   return (
     <div className="banner" role="alert">
       <span className="dot err" />

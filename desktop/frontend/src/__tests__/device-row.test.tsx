@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { apiMock, resetApiMock } from './apiMock'
 import { device, server } from './fixtures'
@@ -94,8 +94,37 @@ describe('DeviceRow', () => {
     expect(container.querySelector('.port.live')).toBeTruthy()
   })
 
-  it('off or offline ports are not live', () => {
+  it('off, offline or not-ready ports are not live', () => {
     expect(row({ on: false }).container.querySelector('.port.live')).toBeNull()
+    expect(row({ on: true, online: false }).container.querySelector('.port.live')).toBeNull()
+    const dev = device({ name: 'nas', on: true })
+    const waiting = render(<DeviceRow server={server({ conn: 'waiting', devices: [dev] })} device={dev} onCommands={noop} />)
+    expect(waiting.container.querySelector('.port.live')).toBeNull()
+  })
+
+  it('maps port_conflict rejections by code', async () => {
+    const u = userEvent.setup()
+    apiMock.SetPort.mockRejectedValueOnce(new Error('port_conflict: x'))
+    row()
+    await u.click(screen.getByRole('button', { name: /5102/ }))
+    const input = screen.getByRole('textbox')
+    await u.clear(input)
+    await u.type(input, '6001{Enter}')
+    expect(await screen.findByText('端口 6001 已分配给其他设备')).toBeTruthy()
+  })
+
+  it('relative times refresh on the shared clock', () => {
+    vi.useFakeTimers({ now: Date.parse('2026-11-23T10:00:00Z') })
+    try {
+      row({ started_at: '2026-11-23T09:50:00Z' })
+      expect(screen.getByText(/在线 10 分钟/)).toBeTruthy()
+      act(() => {
+        vi.advanceTimersByTime(5 * 60_000)
+      })
+      expect(screen.getByText(/在线 15 分钟/)).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('switch calls SetForward and does not flip itself', async () => {
@@ -176,5 +205,38 @@ describe('ServerDetail devices and commands dialog', () => {
     expect(screen.getByLabelText('nas 的本机端口')).toBe(input)
     expect(document.activeElement).toBe(input)
     expect((input as HTMLInputElement).value).toBe('51021')
+  })
+
+  it('keeps the same DOM node per device name when devices are reordered or inserted', () => {
+    const props = { platform: 'linux', sshd: { running: true, port: 22 } }
+    const mk = (names: string[]) => server({ devices: names.map((n) => device({ name: n })) })
+    const view = render(<ServerDetail server={mk(['a', 'b'])} {...props} />)
+    const nodeOf = (n: string) => screen.getByText(n, { selector: '.name' }).closest('.item')
+    const b = nodeOf('b')
+    view.rerender(<ServerDetail server={mk(['c', 'a', 'b'])} {...props} />)
+    expect(nodeOf('b')).toBe(b)
+  })
+
+  it('closes the commands dialog when its device disappears and does not reopen it', async () => {
+    const u = userEvent.setup()
+    const props = { platform: 'linux', sshd: { running: true, port: 22 } }
+    const withDev = server({ devices: [device({ name: 'nas' })] })
+    const view = render(<ServerDetail server={withDev} {...props} />)
+    await u.click(screen.getByRole('button', { name: /连接命令: nas/ }))
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    view.rerender(<ServerDetail server={server({ devices: [] })} {...props} />)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    view.rerender(<ServerDetail server={withDev} {...props} />)
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('copy shows 复制失败 when the clipboard API is missing', async () => {
+    const u = userEvent.setup()
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
+    render(<ServerDetail server={server({ devices: [device({ name: 'nas' })] })} platform="linux" sshd={{ running: true, port: 22 }} />)
+    await u.click(screen.getByRole('button', { name: /连接命令: nas/ }))
+    await u.click(screen.getByRole('button', { name: '复制 ssh' }))
+    expect(await screen.findByText('复制失败')).toBeTruthy()
+    expect(screen.queryByText('已复制')).toBeNull()
   })
 })

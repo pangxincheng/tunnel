@@ -123,7 +123,68 @@ describe('ShareSection', () => {
     share({ busy: true })
     expect(screen.getByText('正在处理…')).toBeTruthy()
     expect((screen.getByRole('switch', { name: '共享这台电脑' }) as HTMLButtonElement).disabled).toBe(true)
-    expect((screen.getByLabelText(/设备名字/) as HTMLInputElement).disabled).toBe(true)
+    const input = screen.getByLabelText(/设备名字/) as HTMLInputElement
+    // readOnly (not disabled) so a focused input keeps its focus state
+    expect(input.disabled).toBe(false)
+    expect(input.readOnly).toBe(true)
+    expect(input.getAttribute('aria-busy')).toBe('true')
+  })
+
+  it('sshd off sentences are one full sentence per OS', () => {
+    const cases: [string, string][] = [
+      ['darwin', '本机 SSH 服务未开启,不能共享。在 系统设置 → 通用 → 共享 中打开“远程登录”'],
+      ['linux', '本机 SSH 服务未开启,不能共享。安装并启动 openssh-server'],
+      ['windows', '本机 SSH 服务未开启,不能共享。在 设置 → 系统 → 可选功能 中添加“OpenSSH 服务器”并启动服务'],
+    ]
+    for (const [os, text] of cases) {
+      const { container, unmount } = share({}, os, { running: false, port: 0 })
+      expect(container.querySelector('.sshd-off')!.textContent).toBe(text)
+      unmount()
+    }
+  })
+
+  it('English sshd sentence has a space between problem and fix', () => {
+    setLang('en')
+    const { container } = share({}, 'linux', { running: false, port: 0 })
+    expect(container.querySelector('.sshd-off')!.textContent).toBe('The SSH service is off, so sharing is unavailable. Install and start openssh-server')
+  })
+
+  it('a no_sshd rejection shows the same sentence', async () => {
+    apiMock.SetShare.mockRejectedValueOnce(new Error('no_sshd: none'))
+    share({}, 'linux')
+    await userEvent.click(screen.getByRole('switch', { name: '共享这台电脑' }))
+    const note = await screen.findByRole('status')
+    expect(note.textContent).toBe('本机 SSH 服务未开启,不能共享。安装并启动 openssh-server')
+  })
+
+  it('an active share can always be switched off (sshd down or name_err)', async () => {
+    share({ on: true, phase: 'ready', name_err: 'taken' }, 'linux', { running: false, port: 0 })
+    const sw = screen.getByRole('switch', { name: '共享这台电脑' }) as HTMLButtonElement
+    expect(sw.disabled).toBe(false)
+    await userEvent.click(sw)
+    expect(apiMock.SetShare).toHaveBeenCalledWith('home', false)
+  })
+
+  it('name_taken rejection names the attempted name and clears when editing', async () => {
+    const u = userEvent.setup()
+    apiMock.SetShareName.mockRejectedValueOnce(new Error('name_taken: x'))
+    share()
+    const input = screen.getByLabelText(/设备名字/)
+    await u.clear(input)
+    await u.type(input, 'nas{Enter}')
+    expect(await screen.findByText('「nas」在 home 上已被另一台设备使用,换一个名字')).toBeTruthy()
+    await u.type(input, '2')
+    expect(screen.queryByText(/已被另一台设备使用/)).toBeNull()
+  })
+
+  it('copy shows 复制失败 without a clipboard API', async () => {
+    const u = userEvent.setup()
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
+    share({ on: true, phase: 'failed', err: 'x' })
+    apiMock.OpenLog.mockRejectedValueOnce(new Error('journal: journalctl -u x'))
+    await u.click(screen.getByText('查看日志'))
+    await u.click(await screen.findByText('复制'))
+    expect(await screen.findByText('复制失败')).toBeTruthy()
   })
 
   it('share switch calls SetShare without flipping itself', async () => {
