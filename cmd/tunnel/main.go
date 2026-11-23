@@ -49,6 +49,7 @@ Usage:
   tunnel uninstall [--mode=MODE] [--profile=P]
   tunnel status [--mode=MODE] [--profile=P] [--json]
   tunnel (pause|resume|retry) [--mode=MODE] [--profile=P]
+  tunnel set-name NAME [--mode=MODE] [--profile=P]
   tunnel run-service --mode=MODE --profile=P
   tunnel version
 
@@ -72,7 +73,8 @@ Options:
 
 服务命令(install 等)只支持按名字转发,共享本机 127.0.0.1:<local-ssh-port>;
 --name 是设备名字,只保存在服务配置中;同一 profile 再次 install 即更新(可改名字)。
-其余服务命令按 --profile(默认 default)定位服务,--mode 缺省时自动查找。status 退出码 3 = 已安装但未运行。
+其余服务命令按 --profile(默认 default)定位服务,--mode 缺省时自动查找。未给 --profile 时,本机只安装了一个服务就自动选它。
+status 退出码 3 = 已安装但未运行,4 = 未安装(--json 时分别输出 installed/running 与 installed=false 的一行 JSON)。
 `
 
 func main() {
@@ -105,6 +107,8 @@ func main() {
 		os.Exit(controlCmd(defaultEnv(logger), args, "resume"))
 	case boolArg(args, "retry"):
 		os.Exit(controlCmd(defaultEnv(logger), args, "retry"))
+	case boolArg(args, "set-name"):
+		os.Exit(setNameCmd(defaultEnv(logger), args))
 	case boolArg(args, "run-service"):
 		runServiceMain(args)
 	}

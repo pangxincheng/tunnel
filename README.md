@@ -216,13 +216,20 @@ tunnel install --mode system --for-user alice --name nas -c tunnel.toml
 
 ```bash
 tunnel status                 # 状态:连接中 / 已就绪 / 等待重连 / 失败 / 已暂停
-tunnel status --json          # 原样输出 JSON(供脚本 / 桌面 App 使用)
+tunnel status --json          # 输出一行 JSON(供脚本 / 桌面 App 使用)
+tunnel set-name NAME          # 不重装,经控制通道改设备名字(名字不合法或被占用时退出码 1)
 tunnel pause                  # 暂停共享并断开;重启后仍保持暂停
 tunnel resume                 # 恢复共享
 tunnel retry                  # 跳过退避等待立即重连(失败修正后用它重试)
 ```
 
-这些命令按 `--profile`(默认 `default`)定位服务,`--name` 不再用于选择;`--mode` 缺省时依次查找 user、system(两者都有时要求 `--mode`)。服务已安装但控制通道连不上时,`status` 输出「已安装,未运行」,退出码 3。暂停**不**删除 VPS 上的设备信息,其他设备会看到它「离线 / 最后在线」。
+这些命令按 `--profile` 定位服务(缺省见下方自动选择),`--name` 不再用于选择;`--mode` 缺省时依次查找 user、system(两者都有时要求 `--mode`)。服务已安装但控制通道连不上时,`status` 输出「已安装,未运行」,退出码 3。暂停**不**删除 VPS 上的设备信息,其他设备会看到它「离线 / 最后在线」。
+
+- **自动选择 profile**:不给 `--profile` 时,扫描本机(user 与 system 模式合计)已安装的服务:只有一个就直接选它;没有则报未安装;装了多个则报错「已安装多个服务(…),请用 --profile 指定」。
+- **`status` 退出码与 `--json` 输出**:
+  - 运行中:退出码 0;`--json` 输出一行 JSON,含 `ShareStatus` 的全部字段,另加 `"mode":"user"|"system"`。
+  - 已安装但未运行:退出码 3;`--json` 时只输出 `{"installed":true,"running":false,"mode":"<mode>"}`。
+  - 未安装:退出码 4;`--json` 时输出 `{"installed":false}`。
 
 日志:Linux 用 `journalctl -u tunnel-<profile> -f`(user 模式加 `--user`);macOS 在 `/var/log/tunnel/<服务名>.log`(system)或 `~/Library/Application Support/tunnel/<服务名>/tunnel.log`(user);Windows 在 `%USERPROFILE%\AppData\Roaming\tunnel\<服务名>\tunnel.log`。
 

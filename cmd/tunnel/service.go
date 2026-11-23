@@ -32,7 +32,8 @@ const (
 	serviceKey     = "id_key"      // system 模式复制的私钥
 	serviceOwner   = "owner"       // system 模式记录的安装用户 UID
 
-	exitNotRunning = 3 // 服务已安装但控制通道连不上
+	exitNotRunning   = 3 // 服务已安装但控制通道连不上
+	exitNotInstalled = 4 // 找不到已安装的服务(status)
 )
 
 // svcEnv 是服务子命令的全部外部依赖。
@@ -463,15 +464,36 @@ func installedAt(env *svcEnv, mode svc.Mode, profile string) bool {
 	return err == nil
 }
 
-// resolveTarget 由 --mode / --profile 定位已安装的共享服务(每个 profile 一个):
-// --profile 缺省为 default;未给 --mode 时依次查找 user、system(都有则要求指定)。
+// errNotInstalled 表示找不到已安装的服务(status 据此返回退出码 exitNotInstalled)。
+var errNotInstalled = errors.New("未找到已安装的服务")
+
+// installedProfiles 列出 mode 下已安装服务的 profile(服务配置目录的父目录中的 tunnel-*)。
+func installedProfiles(env *svcEnv, mode svc.Mode) []string {
+	parent := filepath.Dir(env.paths(mode, svc.ServiceName("x")).ConfigDir)
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		profile, ok := strings.CutPrefix(e.Name(), svc.ServiceName(""))
+		if !ok || profile == "" || tunnel.ValidateName(profile) != nil {
+			continue
+		}
+		if installedAt(env, mode, profile) {
+			out = append(out, profile)
+		}
+	}
+	return out
+}
+
+// resolveTarget 由 --mode / --profile 定位已安装的共享服务(每个 profile 一个)。
+// 给了 --profile 时只找该 profile,未给 --mode 时依次查找 user、system(都有则要求指定);
+// 没给 --profile 时扫描所有(或 --mode 指定的)模式下已安装的服务:只有一个就选它,
+// 多个则报错并列出。找不到时返回的错误满足 errors.Is(err, errNotInstalled)。
 func resolveTarget(env *svcEnv, args map[string]interface{}) (target, error) {
 	if err := applyOwner(env, "", ""); err != nil {
 		return target{}, err
-	}
-	profile := strArg(args, "--profile", defaultProfile)
-	if err := tunnel.ValidateName(profile); err != nil {
-		return target{}, fmt.Errorf("profile 不合法:%w", err)
 	}
 	var modes []svc.Mode
 	if m := strArg(args, "--mode", ""); m != "" {
@@ -479,53 +501,127 @@ func resolveTarget(env *svcEnv, args map[string]interface{}) (target, error) {
 		if err != nil {
 			return target{}, err
 		}
-		if !installedAt(env, mode, profile) {
-			return target{}, fmt.Errorf("未找到已安装的服务 %s(%s 模式)", svc.ServiceName(profile), mode)
+		modes = []svc.Mode{mode}
+	} else {
+		modes = []svc.Mode{svc.ModeUser}
+		if env.goos != "windows" {
+			modes = append(modes, svc.ModeSystem)
 		}
-		return target{mode, profile}, nil
 	}
-	modes = []svc.Mode{svc.ModeUser}
-	if env.goos != "windows" {
-		modes = append(modes, svc.ModeSystem)
-	}
+	explicitMode := strArg(args, "--mode", "") != ""
+
 	var found []target
+	if profile := strArg(args, "--profile", ""); profile != "" {
+		if err := tunnel.ValidateName(profile); err != nil {
+			return target{}, fmt.Errorf("profile 不合法:%w", err)
+		}
+		for _, mode := range modes {
+			if installedAt(env, mode, profile) {
+				found = append(found, target{mode, profile})
+			}
+		}
+		switch len(found) {
+		case 0:
+			if explicitMode {
+				return target{}, fmt.Errorf("%w %s(%s 模式)", errNotInstalled, svc.ServiceName(profile), modes[0])
+			}
+			return target{}, fmt.Errorf("%w:profile %s 下没有已安装的服务(先运行 tunnel install,或用 --profile 指定)", errNotInstalled, profile)
+		case 1:
+			return found[0], nil
+		}
+		return target{}, fmt.Errorf("profile %s 在 user 与 system 模式下都已安装,请用 --mode 指定", profile)
+	}
+
 	for _, mode := range modes {
-		if installedAt(env, mode, profile) {
-			found = append(found, target{mode, profile})
+		for _, p := range installedProfiles(env, mode) {
+			found = append(found, target{mode, p})
 		}
 	}
 	switch len(found) {
 	case 0:
-		return target{}, fmt.Errorf("profile %s 下没有已安装的服务(先运行 tunnel install,或用 --profile 指定)", profile)
+		return target{}, fmt.Errorf("%w:本机没有已安装的服务(先运行 tunnel install)", errNotInstalled)
 	case 1:
 		return found[0], nil
 	}
-	return target{}, fmt.Errorf("profile %s 在 user 与 system 模式下都已安装,请用 --mode 指定", profile)
+	same := true
+	var names []string
+	for _, t := range found {
+		same = same && t.profile == found[0].profile
+		names = append(names, fmt.Sprintf("%s(%s)", t.service(), t.mode))
+	}
+	if same {
+		return target{}, fmt.Errorf("profile %s 在 user 与 system 模式下都已安装,请用 --mode 指定", found[0].profile)
+	}
+	return target{}, fmt.Errorf("已安装多个服务(%s),请用 --profile 指定", strings.Join(names, "、"))
 }
 
 // ---------- status / pause / resume / retry ----------
 
 func statusCmd(env *svcEnv, args map[string]interface{}) int {
+	asJSON := boolArg(args, "--json")
 	tg, err := resolveTarget(env, args)
 	if err != nil {
+		if errors.Is(err, errNotInstalled) {
+			if asJSON {
+				fmt.Fprintln(env.stdout, `{"installed":false}`)
+			} else {
+				env.logger.Error("tunnel status 失败", "err", err)
+			}
+			return exitNotInstalled
+		}
 		env.logger.Error("tunnel status 失败", "err", err)
 		return 1
 	}
 	p := env.paths(tg.mode, tg.service())
 	resp, err := tunnel.ControlCall(p.ControlAddr, tunnel.ControlRequest{Op: "status"})
 	if err != nil {
+		if asJSON && !errors.Is(err, fs.ErrPermission) {
+			fmt.Fprintf(env.stdout, "{\"installed\":true,\"running\":false,\"mode\":%q}\n", string(tg.mode))
+			return exitNotRunning
+		}
 		return controlUnreachable(env, tg, p, err)
 	}
 	if resp.Status == nil {
 		env.logger.Error("tunnel status 失败", "err", resp.Error)
 		return 1
 	}
-	if boolArg(args, "--json") {
-		data, _ := json.Marshal(resp.Status)
+	if asJSON {
+		data, _ := json.Marshal(statusJSON{ShareStatus: *resp.Status, Mode: string(tg.mode)})
 		fmt.Fprintln(env.stdout, string(data))
 		return 0
 	}
 	printStatus(env.stdout, tg, *resp.Status)
+	return 0
+}
+
+// statusJSON 是 status --json 运行中的输出:ShareStatus 的全部字段加上运行方式。
+type statusJSON struct {
+	tunnel.ShareStatus
+	Mode string `json:"mode"`
+}
+
+// setNameCmd 对应 tunnel set-name NAME:经控制通道改设备名字(服务名与安装方式不变)。
+func setNameCmd(env *svcEnv, args map[string]interface{}) int {
+	name := strArg(args, "NAME", "")
+	if err := tunnel.ValidateName(name); err != nil {
+		env.logger.Error("tunnel set-name 失败", "err", fmt.Errorf("名字不合法:%w", err))
+		return 1
+	}
+	tg, err := resolveTarget(env, args)
+	if err != nil {
+		env.logger.Error("tunnel set-name 失败", "err", err)
+		return 1
+	}
+	p := env.paths(tg.mode, tg.service())
+	resp, err := tunnel.ControlCall(p.ControlAddr, tunnel.ControlRequest{Op: "set-name", Name: name})
+	if err != nil {
+		return controlUnreachable(env, tg, p, err)
+	}
+	if !resp.OK {
+		env.logger.Error("tunnel set-name 失败", "err", resp.Error)
+		return 1
+	}
+	fmt.Fprintf(env.stdout, "%s:设备名字已改为 %s\n", tg.service(), name)
 	return 0
 }
 

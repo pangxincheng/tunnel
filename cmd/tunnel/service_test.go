@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/ed25519"
@@ -385,6 +386,7 @@ func TestUsageParsesServiceCommands(t *testing.T) {
 		{"status", "--json"},
 		{"pause", "--profile", "home"},
 		{"resume"},
+		{"set-name", "nas2", "--mode", "user", "--profile", "home"},
 		{"retry", "--mode", "system"},
 		{"run-service", "--mode", "user", "--profile", "default"},
 		{"server", "--user", "alice", "--name", "nas"},
@@ -658,8 +660,8 @@ func TestStatusNotRunning(t *testing.T) {
 
 func TestStatusNotInstalled(t *testing.T) {
 	f := newFixture(t)
-	if code := statusCmd(f.env, parse(t, "status")); code != 1 {
-		t.Fatalf("未安装时退出码应为 1,got %d", code)
+	if code := statusCmd(f.env, parse(t, "status")); code != 4 {
+		t.Fatalf("未安装时退出码应为 4,got %d", code)
 	}
 }
 
@@ -979,5 +981,143 @@ func TestInstallWindowsStopsTaskBeforeCopy(t *testing.T) {
 	}
 	if s := f.mgr.installed[0]; s.User != `PC\tester` {
 		t.Fatalf("Spec.User = %q,应为当前账户", s.User)
+	}
+}
+
+// ---------- app 用:status --json / 退出码 / set-name / 自动 profile ----------
+
+// writeInstalled 在假路径下摆出一个已安装服务的配置。
+func (f *fixture) writeInstalled(t *testing.T, mode svc.Mode, profile string) svc.Paths {
+	t.Helper()
+	p := f.env.paths(mode, svc.ServiceName(profile))
+	if err := os.MkdirAll(p.ConfigDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "name = \"nas\"\nprofile = \"" + profile + "\"\n"
+	if err := os.WriteFile(filepath.Join(p.ConfigDir, "tunnel.toml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// fakeControl 在 addr 上起一个假控制通道:每个请求发给 reqs,回复 resp。
+func fakeControl(t *testing.T, addr string, resp tunnel.ControlResponse) <-chan tunnel.ControlRequest {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(addr), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	l, err := net.Listen("unix", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	reqs := make(chan tunnel.ControlRequest, 8)
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			var req tunnel.ControlRequest
+			json.NewDecoder(bufio.NewReader(c)).Decode(&req)
+			reqs <- req
+			json.NewEncoder(c).Encode(resp)
+			c.Close()
+		}
+	}()
+	return reqs
+}
+
+func TestStatusJSONIncludesMode(t *testing.T) {
+	f := newFixture(t)
+	p := f.writeInstalled(t, svc.ModeUser, "default")
+	fakeControl(t, p.ControlAddr, tunnel.ControlResponse{OK: true,
+		Status: &tunnel.ShareStatus{ConnState: tunnel.ConnState{Phase: tunnel.PhaseReady}, Name: "nas", Version: "x"}})
+	if code := statusCmd(f.env, parse(t, "status", "--json")); code != 0 {
+		t.Fatalf("code=%d out=%s", code, f.out.String())
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(f.out.Bytes(), &m); err != nil {
+		t.Fatalf("输出应为一行 JSON: %q: %v", f.out.String(), err)
+	}
+	if m["mode"] != "user" || m["phase"] != "ready" || m["name"] != "nas" {
+		t.Fatalf("got %v", m)
+	}
+	if strings.Count(strings.TrimSpace(f.out.String()), "\n") != 0 {
+		t.Fatalf("应只有一行: %q", f.out.String())
+	}
+}
+
+func TestStatusJSONNotRunning(t *testing.T) {
+	f := newFixture(t)
+	f.writeInstalled(t, svc.ModeUser, "default")
+	code := statusCmd(f.env, parse(t, "status", "--json"))
+	if code != 3 {
+		t.Fatalf("code=%d", code)
+	}
+	if got := strings.TrimSpace(f.out.String()); got != `{"installed":true,"running":false,"mode":"user"}` {
+		t.Fatalf("out=%q", got)
+	}
+}
+
+func TestStatusNotInstalledExit4(t *testing.T) {
+	f := newFixture(t)
+	code := statusCmd(f.env, parse(t, "status", "--json", "--profile", "default"))
+	if code != 4 || strings.TrimSpace(f.out.String()) != `{"installed":false}` {
+		t.Fatalf("code=%d out=%q", code, f.out.String())
+	}
+	f.out.Reset()
+	if code := statusCmd(f.env, parse(t, "status")); code != 4 || f.out.Len() != 0 {
+		t.Fatalf("无 --json 时退出码应为 4 且 stdout 无 JSON: code=%d out=%q", code, f.out.String())
+	}
+}
+
+func TestSetNameCmd(t *testing.T) {
+	f := newFixture(t)
+	p := f.writeInstalled(t, svc.ModeUser, "default")
+	reqs := fakeControl(t, p.ControlAddr, tunnel.ControlResponse{OK: true})
+	if code := setNameCmd(f.env, parse(t, "set-name", "nas2")); code != 0 {
+		t.Fatalf("code=%d", code)
+	}
+	if req := <-reqs; req.Op != "set-name" || req.Name != "nas2" {
+		t.Fatalf("req=%+v", req)
+	}
+}
+
+func TestSetNameCmdErrors(t *testing.T) {
+	f := newFixture(t)
+	p := f.writeInstalled(t, svc.ModeUser, "default")
+	taken := &tunnel.NameTakenError{Name: "nas2", Owner: tunnel.DeviceInfo{Hostname: "other"}}
+	fakeControl(t, p.ControlAddr, tunnel.ControlResponse{Error: taken.Error()})
+	var errBuf bytes.Buffer
+	f.env.logger = slog.New(slog.NewTextHandler(&errBuf, nil))
+	if code := setNameCmd(f.env, parse(t, "set-name", "nas2")); code != 1 || !strings.Contains(errBuf.String(), "已被另一台设备") {
+		t.Fatalf("code=%d log=%s", code, errBuf.String())
+	}
+	// 不合法的名字不用发给服务
+	if code := setNameCmd(f.env, parse(t, "set-name", "bad name!")); code != 1 {
+		t.Fatalf("不合法名字退出码应为 1,got %d", code)
+	}
+}
+
+func TestResolveTargetAutoProfile(t *testing.T) {
+	f := newFixture(t)
+	f.writeInstalled(t, svc.ModeUser, "home")
+	tg, err := resolveTarget(f.env, parse(t, "status"))
+	if err != nil || tg.profile != "home" || tg.mode != svc.ModeUser {
+		t.Fatalf("只装了 home 时应自动选中: %+v %v", tg, err)
+	}
+	f.writeInstalled(t, svc.ModeUser, "work")
+	_, err = resolveTarget(f.env, parse(t, "status"))
+	if err == nil || !strings.Contains(err.Error(), "home") || !strings.Contains(err.Error(), "work") ||
+		!strings.Contains(err.Error(), "--profile") || errors.Is(err, errNotInstalled) {
+		t.Fatalf("多个服务应报错并列出: %v", err)
+	}
+	// 显式 --profile 不受影响
+	if tg, err := resolveTarget(f.env, parse(t, "status", "--profile", "work")); err != nil || tg.profile != "work" {
+		t.Fatalf("%+v %v", tg, err)
+	}
+	if _, err := resolveTarget(f.env, parse(t, "status", "--profile", "none")); !errors.Is(err, errNotInstalled) {
+		t.Fatalf("应为 errNotInstalled: %v", err)
 	}
 }

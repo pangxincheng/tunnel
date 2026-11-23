@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-23
+
+- `tunnel status --json` 运行中的输出在 `ShareStatus` 全部字段之外加 `"mode":"user"|"system"`;已安装但未运行时(退出码 3)`--json` 只输出 `{"installed":true,"running":false,"mode":"<mode>"}`;新增退出码 4 = 未安装(`--json` 输出 `{"installed":false}`),原先未安装为退出码 1(供 tunnel-app 判断安装 / 运行状态)。
+- 新增 `tunnel set-name NAME [--mode=MODE] [--profile=P]`:经控制通道发 `set-name` 不重装改设备名字,成功 0;名字不合法或被占用(`NameTakenError` 的信息输出到 stderr)退出码 1。
+- 不给 `--profile` 时自动选择:扫描 user / system 两种模式下已安装的 `tunnel-*` 服务,只有一个就选它,没有则按未安装处理,多个则报「已安装多个服务(…),请用 --profile 指定」(同一 profile 在两种模式都有时仍提示用 `--mode`);`resolveTarget` 找不到服务时返回哨兵错误 `errNotInstalled`。此前不给 `--profile` 固定取 `default`。
+- README「开机自启与后台运行」补充 set-name、status 退出码 / JSON 输出与自动选择 profile。
+
 ## 2026-11-22(tunnel-app 支持)
 
 - 每个服务器 profile 一个共享服务(终审 I3):`svc.ServiceName(profile)` → `tunnel-<profile>`,设备名字只保存在服务配置中,set-name 不改变服务身份;`status` / `pause` / `resume` / `retry` / `uninstall` 按 `--profile`(默认 `default`)定位,不再接受 `--name`;`run-service` 只带 `--mode --profile`;同一 profile 已以另一种模式安装时 `install` 报「已以 <mode> 方式安装,请先 tunnel uninstall --mode <mode>」,同一模式重复安装即更新(换名字时用验证连接顺带删除 VPS 上本机旧名字的设备信息)。原来按目录名前缀列举服务、`-` 歧义(M5)随之消失。
