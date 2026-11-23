@@ -24,6 +24,10 @@ type Server struct {
 	Share        ShareIntent          `json:"share"`
 	Forwards     map[string]Forward   `json:"forwards"`  // key: device name
 	LastSeen     map[string]time.Time `json:"last_seen"` // last time a device was seen online
+	// Devices caches the last fetched device list (this machine excluded) so
+	// rows stay visible while the server is disconnected or unreachable.
+	Devices   []tunnel.DeviceInfo `json:"devices"`
+	DevicesAt time.Time           `json:"devices_at"` // when Devices was fetched
 }
 
 type ShareIntent struct {

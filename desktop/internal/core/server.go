@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"sort"
 	"strconv"
@@ -20,13 +21,12 @@ type server struct {
 	op sync.Mutex // serializes multi-step operations on this server
 
 	// guarded by Manager.mu
-	conn      *conn // nil while disconnected
-	devices   []tunnel.Device
-	devicesAt time.Time
-	fwdErr    map[string]string // device -> DeviceView.Err code
-	share     sharesvc.State    // last synced share state
-	nameErr   string
-	busy      bool
+	conn    *conn             // nil while disconnected
+	devices []tunnel.Device   // last fetched (or cached, Online=false) list, sorted by name
+	fwdErr  map[string]string // device -> DeviceView.Err code
+	share   sharesvc.State    // last synced share state
+	nameErr string
+	busy    bool
 }
 
 func newServer() *server { return &server{fwdErr: map[string]string{}} }
@@ -170,12 +170,23 @@ func (m *Manager) refreshDevices(ctx context.Context, s *server, c *conn) {
 	}
 	now := m.d.Now()
 	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
-	s.devices, s.devicesAt = list, now
+	wasOnline := map[string]bool{}
+	for _, d := range s.devices {
+		wasOnline[d.Name] = d.Online
+	}
+	s.devices = list
+	// LastSeen and DevicesAt are updated in memory every time but only written
+	// when something else changes (or at shutdown / on the next save).
+	sc.DevicesAt = now
 	changed := false
+	var infos []tunnel.DeviceInfo
+	seen := map[string]bool{}
 	for _, d := range list {
 		if d.DeviceID == m.d.DeviceID {
 			continue
 		}
+		infos = append(infos, d.DeviceInfo)
+		seen[d.Name] = true
 		if _, ok := sc.Forwards[d.Name]; !ok {
 			if p := m.cfg.AllocatePort(m.d.PortFree); p != 0 {
 				sc.Forwards[d.Name] = config.Forward{Port: p}
@@ -184,12 +195,39 @@ func (m *Manager) refreshDevices(ctx context.Context, s *server, c *conn) {
 		}
 		if d.Online {
 			sc.LastSeen[d.Name] = now
+		} else if wasOnline[d.Name] {
+			changed = true // went offline: persist the last time it was seen
+		}
+	}
+	for name, on := range wasOnline {
+		if on && !seen[name] {
 			changed = true
 		}
+	}
+	if !sameInfos(sc.Devices, infos) {
+		sc.Devices = infos
+		changed = true
 	}
 	if changed {
 		_ = m.saveLocked()
 	}
+}
+
+func sameInfos(a, b []tunnel.DeviceInfo) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		x, y := a[i], b[i]
+		if !x.StartedAt.Equal(y.StartedAt) {
+			return false
+		}
+		x.StartedAt, y.StartedAt = time.Time{}, time.Time{}
+		if x != y {
+			return false
+		}
+	}
+	return true
 }
 
 // findDevice returns the last listed device named name (own device excluded).
@@ -294,6 +332,9 @@ func (m *Manager) AddServer(s config.Server) error {
 	if err := m.cfg.ValidateServerName(s.Name, ""); err != nil {
 		return err
 	}
+	if m.reserved[s.Name] {
+		return fmt.Errorf("名称 %q 已存在", s.Name)
+	}
 	s.Disconnected = false
 	initMaps(&s)
 	m.cfg.Servers = append(m.cfg.Servers, s)
@@ -328,12 +369,25 @@ func (m *Manager) UpdateServer(oldName string, ns config.Server) error {
 
 	m.mu.Lock()
 	sc, _ := m.cfg.Server(oldName)
+	renamed := ns.Name != oldName
 	if err := m.cfg.ValidateServerName(ns.Name, oldName); err != nil {
 		m.mu.Unlock()
 		return err
 	}
+	if renamed && m.reserved[ns.Name] {
+		m.mu.Unlock()
+		return fmt.Errorf("名称 %q 已存在", ns.Name)
+	}
+	if renamed { // hold the new name until committed
+		m.reserved[ns.Name] = true
+		defer func() {
+			m.mu.Lock()
+			delete(m.reserved, ns.Name)
+			m.mu.Unlock()
+		}()
+	}
 	ns.Disconnected, ns.Share, ns.Forwards, ns.LastSeen = sc.Disconnected, sc.Share, sc.Forwards, sc.LastSeen
-	renamed := ns.Name != oldName
+	ns.Devices, ns.DevicesAt = sc.Devices, sc.DevicesAt
 	restart := renamed || connParamsChanged(sc, &ns)
 	m.mu.Unlock()
 
@@ -341,10 +395,18 @@ func (m *Manager) UpdateServer(oldName string, ns config.Server) error {
 	if restart {
 		st, err := m.shareStatus(oldName)
 		if err != nil {
-			return err
+			if ns.Share.On {
+				return err
+			}
+			// the share was never turned on here; don't block the edit on a broken CLI
+			m.d.Logger.Warn("share status unavailable, skipping share migration", "server", oldName, "err", err)
+			st = sharesvc.State{}
 		}
 		if st.Installed {
 			system := installedSystem(st, ns.Share.System)
+			if _, err := m.localSSHPort(); err != nil { // check before removing the old service
+				return err
+			}
 			if err := m.uninstallShare(s, oldName, system); err != nil {
 				return err
 			}
@@ -363,17 +425,26 @@ func (m *Manager) UpdateServer(oldName string, ns config.Server) error {
 
 // commitServerUpdate stores ns in place of oldName and restarts its Session if needed.
 func (m *Manager) commitServerUpdate(s *server, oldName string, ns config.Server, restart bool) error {
+	m.mu.Lock()
+	if cur := m.servers[ns.Name]; ns.Name != oldName && cur != nil && cur != s {
+		m.mu.Unlock()
+		return fmt.Errorf("名称 %q 已存在", ns.Name)
+	}
 	var old *conn
 	if restart {
-		m.mu.Lock()
 		old, s.conn = s.conn, nil
-		m.mu.Unlock()
-		stopConn(old) // wait: the new Session reuses the same local ports
 	}
+	m.mu.Unlock()
+	stopConn(old) // wait: the new Session reuses the same local ports
+
 	m.mu.Lock()
 	defer m.notify()
 	defer m.mu.Unlock()
 	sc, _ := m.cfg.Server(oldName)
+	if restart { // possibly a different server now: drop the cached device list
+		ns.Devices, ns.DevicesAt = nil, time.Time{}
+		s.devices = nil
+	}
 	*sc = ns
 	if ns.Name != oldName {
 		delete(m.servers, oldName)
@@ -381,7 +452,6 @@ func (m *Manager) commitServerUpdate(s *server, oldName string, ns config.Server
 		if m.cfg.Selected == oldName {
 			m.cfg.Selected = ns.Name
 		}
-		s.devices, s.devicesAt = nil, time.Time{}
 	}
 	if restart && !sc.Disconnected {
 		m.startConnLocked(s, sc)
@@ -400,7 +470,9 @@ func (m *Manager) DeleteServer(name string) error {
 
 	st, err := m.shareStatus(name)
 	if err != nil {
-		return err
+		// the user wants the server gone; a broken CLI must not prevent that
+		m.d.Logger.Warn("share status unavailable, deleting without uninstalling", "server", name, "err", err)
+		st = sharesvc.State{}
 	}
 	if st.Installed {
 		m.mu.Lock()
@@ -448,19 +520,22 @@ func (m *Manager) SetConnected(name string, on bool) error {
 
 	m.mu.Lock()
 	sc, _ := m.cfg.Server(name)
-	if sc.Disconnected == !on {
+	if on && !sc.Disconnected {
 		m.mu.Unlock()
 		return nil
 	}
-	sc.Disconnected = !on
 	share := sc.Share
 	var old *conn
-	if on {
-		m.startConnLocked(s, sc)
-	} else {
-		old, s.conn = s.conn, nil
+	if sc.Disconnected != !on {
+		sc.Disconnected = !on
+		if on {
+			m.startConnLocked(s, sc)
+		} else {
+			old, s.conn = s.conn, nil
+		}
+		err = m.saveLocked()
 	}
-	err = m.saveLocked()
+	// Already disconnected: fall through so a previously failed Pause is retried.
 	m.mu.Unlock()
 	stopConn(old)
 	if err != nil {

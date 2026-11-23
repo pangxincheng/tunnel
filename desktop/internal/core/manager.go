@@ -13,6 +13,7 @@ package core
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"runtime"
 	"strconv"
@@ -67,6 +68,7 @@ type Deps struct {
 	RefreshEvery  time.Duration                                                                      // default 30s
 	ShareEvery    time.Duration                                                                      // default 3s
 	TunnelVersion string                                                                             // version of the bundled tunnel CLI
+	Logger        *slog.Logger                                                                       // default slog.Default()
 }
 
 var (
@@ -90,12 +92,16 @@ type Manager struct {
 	mu      sync.Mutex
 	cfg     *config.Config
 	servers map[string]*server // runtime state by server name
-	sshd    sshd.Result
-	ctx     context.Context // from Start; parent of all sessions
-	started bool
+	// reserved holds new names of renames in progress, so nothing else can
+	// take them while the rename waits on the share service.
+	reserved map[string]bool
+	sshd     sshd.Result
+	ctx      context.Context // from Start; parent of all sessions
+	started  bool
 
 	changed chan struct{}
 	wg      sync.WaitGroup // all background goroutines
+	saves   int            // config writes (tests)
 }
 
 // New loads the config and prepares the manager; nothing runs until Start.
@@ -114,6 +120,9 @@ func New(d Deps) (*Manager, error) {
 	if d.PortFree == nil {
 		d.PortFree = portFree
 	}
+	if d.Logger == nil {
+		d.Logger = slog.Default()
+	}
 	if d.Now == nil {
 		d.Now = time.Now
 	}
@@ -127,11 +136,16 @@ func New(d Deps) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
-	m := &Manager{d: d, cfg: cfg, servers: map[string]*server{}, ctx: context.Background(),
-		changed: make(chan struct{}, 1)}
+	m := &Manager{d: d, cfg: cfg, servers: map[string]*server{}, reserved: map[string]bool{},
+		ctx: context.Background(), changed: make(chan struct{}, 1)}
 	for i := range cfg.Servers {
-		initMaps(&cfg.Servers[i])
-		m.servers[cfg.Servers[i].Name] = newServer()
+		sc := &cfg.Servers[i]
+		initMaps(sc)
+		s := newServer()
+		for _, info := range sc.Devices { // cached list; online state unknown until refreshed
+			s.devices = append(s.devices, tunnel.Device{DeviceInfo: info})
+		}
+		m.servers[sc.Name] = s
 	}
 	return m, nil
 }
@@ -182,6 +196,12 @@ func (m *Manager) Start(ctx context.Context) {
 	m.goBackground(func() { m.notifyLoop(ctx) })
 	m.goBackground(func() { m.shareLoop(ctx) })
 	m.goBackground(func() { m.detectSSHD(ctx) })
+	m.goBackground(func() { // persist in-memory LastSeen / DevicesAt on shutdown
+		<-ctx.Done()
+		m.mu.Lock()
+		_ = m.saveLocked()
+		m.mu.Unlock()
+	})
 	m.notify()
 }
 
@@ -219,7 +239,10 @@ func (m *Manager) notifyLoop(ctx context.Context) {
 	}
 }
 
-func (m *Manager) saveLocked() error { return config.Save(m.d.ConfigPath, m.cfg) }
+func (m *Manager) saveLocked() error {
+	m.saves++
+	return config.Save(m.d.ConfigPath, m.cfg)
+}
 
 // lookup returns the config entry and runtime state of server; caller holds mu.
 func (m *Manager) lookupLocked(name string) (*config.Server, *server, error) {
@@ -292,7 +315,7 @@ func (m *Manager) Refresh(server string) {
 	if c != nil {
 		c.kick()
 	}
-	if started {
+	if started && ctx.Err() == nil {
 		m.goBackground(func() { m.detectSSHD(ctx) })
 	}
 }

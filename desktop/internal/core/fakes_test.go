@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -134,6 +135,12 @@ type fakeShare struct {
 	svc         map[string]*fakeSvc // profile -> installed service
 	calls       []string
 	installErrs []error // popped per Install call
+	pauseErrs   []error // popped per Pause call
+	statusErr   error
+	// installBlock, if set, makes Install wait for it to be closed after
+	// signalling installStarted (non-blocking send).
+	installBlock   chan struct{}
+	installStarted chan struct{}
 }
 
 type fakeSvc struct {
@@ -160,6 +167,9 @@ func (f *fakeShare) Calls() []string {
 func (f *fakeShare) Status(ctx context.Context, profile string) (sharesvc.State, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.statusErr != nil {
+		return sharesvc.State{}, f.statusErr
+	}
 	s, ok := f.svc[profile]
 	if !ok {
 		return sharesvc.State{}, nil
@@ -177,6 +187,16 @@ func (f *fakeShare) Status(ctx context.Context, profile string) (sharesvc.State,
 }
 
 func (f *fakeShare) Install(ctx context.Context, o sharesvc.InstallOpts) error {
+	f.mu.Lock()
+	block, started := f.installBlock, f.installStarted
+	f.mu.Unlock()
+	if block != nil {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-block
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.record(fmt.Sprintf("install %s name=%s system=%v local=%d", o.Profile, o.Name, o.System, o.LocalPort))
@@ -203,6 +223,13 @@ func (f *fakeShare) Pause(ctx context.Context, profile string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.record("pause " + profile)
+	if len(f.pauseErrs) > 0 {
+		err := f.pauseErrs[0]
+		f.pauseErrs = f.pauseErrs[1:]
+		if err != nil {
+			return err
+		}
+	}
 	if s, ok := f.svc[profile]; ok {
 		s.paused = true
 	}
@@ -257,7 +284,11 @@ type env struct {
 	mu       sync.Mutex
 	sshd     sshd.Result
 	changes  int
+	detects  int
 	lastSeen AppState
+
+	refreshEvery, shareEvery time.Duration // set in prep to override 10ms
+	cancel                   context.CancelFunc
 }
 
 func srvCfg(name string) config.Server {
@@ -273,14 +304,29 @@ var t0 = time.Date(2026, 11, 23, 10, 0, 0, 0, time.UTC)
 // newEnv saves cfg (nil = empty defaults) and starts a Manager on it.
 func newEnv(t *testing.T, cfg *config.Config, prep ...func(*env)) *env {
 	t.Helper()
-	e := &env{t: t, path: filepath.Join(t.TempDir(), "config.json"), sess: &sessFactory{},
-		share: newFakeShare(), clock: &fakeClock{t: t0}, sshd: sshd.Result{Running: true, Port: 22}}
+	path := filepath.Join(t.TempDir(), "config.json")
 	if cfg == nil {
-		cfg, _ = config.Load(e.path)
+		cfg, _ = config.Load(path)
 	}
-	if err := config.Save(e.path, cfg); err != nil {
+	if err := config.Save(path, cfg); err != nil {
 		t.Fatal(err)
 	}
+	return startEnv(t, path, &fakeClock{t: t0}, prep...)
+}
+
+// reopen stops e's Manager and starts a fresh one on the same config file
+// (simulates an app restart).
+func (e *env) reopen(prep ...func(*env)) *env {
+	e.t.Helper()
+	e.cancel()
+	e.m.wg.Wait()
+	return startEnv(e.t, e.path, e.clock, prep...)
+}
+
+func startEnv(t *testing.T, path string, clock *fakeClock, prep ...func(*env)) *env {
+	t.Helper()
+	e := &env{t: t, path: path, sess: &sessFactory{}, share: newFakeShare(), clock: clock,
+		sshd: sshd.Result{Running: true, Port: 22}, refreshEvery: 10 * time.Millisecond, shareEvery: 10 * time.Millisecond}
 	for _, p := range prep {
 		p(e)
 	}
@@ -288,7 +334,7 @@ func newEnv(t *testing.T, cfg *config.Config, prep ...func(*env)) *env {
 		ConfigPath: e.path,
 		NewSession: e.sess.New,
 		Share:      e.share,
-		DetectSSHD: func(context.Context) sshd.Result { e.mu.Lock(); defer e.mu.Unlock(); return e.sshd },
+		DetectSSHD: func(context.Context) sshd.Result { e.mu.Lock(); defer e.mu.Unlock(); e.detects++; return e.sshd },
 		DeviceID:   "self",
 		PortFree:   func(int) bool { return true },
 		Now:        e.clock.Now,
@@ -298,15 +344,17 @@ func newEnv(t *testing.T, cfg *config.Config, prep ...func(*env)) *env {
 			e.lastSeen = s
 			e.mu.Unlock()
 		},
-		RefreshEvery:  10 * time.Millisecond,
-		ShareEvery:    10 * time.Millisecond,
+		RefreshEvery:  e.refreshEvery,
+		ShareEvery:    e.shareEvery,
 		TunnelVersion: "1.2.0",
+		Logger:        slog.New(slog.DiscardHandler),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	e.m = m
 	ctx, cancel := context.WithCancel(context.Background())
+	e.cancel = cancel
 	t.Cleanup(func() { cancel(); m.wg.Wait() })
 	m.Start(ctx)
 	return e

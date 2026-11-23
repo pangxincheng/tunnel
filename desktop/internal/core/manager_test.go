@@ -398,12 +398,13 @@ func TestLastSeen(t *testing.T) {
 	if ls := e.cfgServer("home").LastSeen["a"]; !ls.Equal(t1) {
 		t.Fatalf("last seen %v", ls)
 	}
-	e.clock.Set(t1.Add(time.Hour))
 	t3 := t1.Add(30 * time.Minute)
 	s.setDevices(
 		tunnel.Device{DeviceInfo: tunnel.DeviceInfo{Name: "a", DeviceID: "id-a", StartedAt: t0}},
 		tunnel.Device{DeviceInfo: tunnel.DeviceInfo{Name: "b", DeviceID: "id-b", StartedAt: t3}},
 	)
+	e.refreshNow("home", s) // drain in-flight refreshes that still saw a online
+	e.clock.Set(t1.Add(time.Hour))
 	e.refreshNow("home", s)
 	if ls := e.device("home", "a").LastSeen; !ls.Equal(t1) {
 		t.Fatalf("a last seen %v", ls)
@@ -449,9 +450,10 @@ func TestOwnDeviceHidden(t *testing.T) {
 }
 
 func TestOnChangeCoalesced(t *testing.T) {
-	e := newEnv(t, cfgWith(srvCfg("home")))
+	e := newEnv(t, cfgWith(srvCfg("home")), func(e *env) { e.refreshEvery, e.shareEvery = time.Hour, time.Hour })
 	s := e.session("home", 1)
 	eventually(t, "first change", func() bool { e.mu.Lock(); defer e.mu.Unlock(); return e.changes > 0 })
+	time.Sleep(3 * coalesce) // let start-up notifications (initial share sync, sshd detect) drain
 	e.mu.Lock()
 	start := e.changes
 	e.mu.Unlock()
@@ -484,4 +486,205 @@ func TestConcurrentOps(t *testing.T) {
 		go func() { defer wg.Done(); _ = e.m.SetConnected("work", i%2 == 0) }()
 	}
 	wg.Wait()
+}
+
+// --- review fixes ---
+
+func TestRenameRacesAddServer(t *testing.T) {
+	c := cfgWith(withShare(srvCfg("home"), true, "mac"))
+	e := newEnv(t, c, func(e *env) {
+		e.share.installed("home", false, "mac")
+		e.share.installBlock = make(chan struct{})
+		e.share.installStarted = make(chan struct{}, 1)
+	})
+	done := make(chan error, 1)
+	go func() {
+		ns := srvCfg("lab")
+		ns.Host = "home.example"
+		done <- e.m.UpdateServer("home", ns)
+	}()
+	<-e.share.installStarted // rename is inside the slow reinstall
+	if err := e.m.AddServer(srvCfg("lab")); err == nil {
+		t.Fatal("AddServer took a name reserved by a pending rename")
+	}
+	if err := e.m.AddServer(srvCfg("home")); err == nil {
+		t.Fatal("AddServer took the name being renamed away from")
+	}
+	close(e.share.installBlock)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, s := range e.cfg().Servers {
+		if s.Name == "lab" {
+			n++
+		}
+	}
+	if n != 1 || len(e.cfg().Servers) != 1 {
+		t.Fatalf("servers %+v", e.cfg().Servers)
+	}
+	if got := e.sess.sessions("lab.example"); len(got) != 0 {
+		t.Fatalf("orphaned session(s) for the rejected AddServer: %d", len(got))
+	}
+}
+
+func TestShareReinstallNeedsSSHD(t *testing.T) {
+	c := cfgWith(withShare(srvCfg("home"), true, "mac"))
+	e := newEnv(t, c, func(e *env) {
+		e.share.installed("home", false, "mac")
+		e.sshd = sshd.Result{}
+	})
+	if err := e.m.SetShareSystem("home", true); !errors.Is(err, ErrNoSSHD) {
+		t.Fatalf("got %v", err)
+	}
+	ns := srvCfg("lab")
+	ns.Host = "home.example"
+	if err := e.m.UpdateServer("home", ns); !errors.Is(err, ErrNoSSHD) {
+		t.Fatalf("got %v", err)
+	}
+	if got := e.share.Calls(); len(got) != 0 {
+		t.Fatalf("service touched: %v", got)
+	}
+	if cs := e.cfgServer("home"); cs.Share.System {
+		t.Fatalf("%+v", cs.Share)
+	}
+}
+
+func TestDeleteServerStatusError(t *testing.T) {
+	e := newEnv(t, cfgWith(withShare(srvCfg("home"), true, "mac")), func(e *env) {
+		e.share.statusErr = errors.New("tunnel CLI missing")
+	})
+	if err := e.m.DeleteServer("home"); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.cfg().Servers) != 0 || len(e.share.Calls()) != 0 {
+		t.Fatalf("servers %v calls %v", e.cfg().Servers, e.share.Calls())
+	}
+}
+
+func TestUpdateServerStatusError(t *testing.T) {
+	c := cfgWith(withShare(srvCfg("home"), false, "mac"), withShare(srvCfg("work"), true, "mac"))
+	e := newEnv(t, c, func(e *env) { e.share.statusErr = errors.New("tunnel CLI missing") })
+	if err := e.m.UpdateServer("home", srvCfg("lab")); err != nil {
+		t.Fatalf("share never on: %v", err)
+	}
+	if _, ok := e.cfg().Server("lab"); !ok {
+		t.Fatal("rename not applied")
+	}
+	if err := e.m.UpdateServer("work", srvCfg("lab2")); err == nil {
+		t.Fatal("share on: expected the status error")
+	}
+	if _, ok := e.cfg().Server("work"); !ok {
+		t.Fatal("rename applied despite error")
+	}
+}
+
+func TestDisconnectRetriesFailedPause(t *testing.T) {
+	e := newEnv(t, cfgWith(withShare(srvCfg("home"), true, "mac")), func(e *env) {
+		e.share.installed("home", false, "mac")
+		e.share.pauseErrs = []error{errors.New("pause failed")}
+	})
+	if err := e.m.SetConnected("home", false); err == nil {
+		t.Fatal("expected pause error")
+	}
+	if !e.cfgServer("home").Disconnected {
+		t.Fatal("not disconnected")
+	}
+	if err := e.m.SetConnected("home", false); err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, c := range e.share.Calls() {
+		if c == "pause home" {
+			n++
+		}
+	}
+	if n != 2 {
+		t.Fatalf("calls %v", e.share.Calls())
+	}
+}
+
+func TestParamChangeClearsDevices(t *testing.T) {
+	e := newEnv(t, cfgWith(srvCfg("home")))
+	e.ready("home", dev("a", "id-a", true))
+	ns := srvCfg("home")
+	ns.Host = "other.example"
+	if err := e.m.UpdateServer("home", ns); err != nil {
+		t.Fatal(err)
+	}
+	v := e.view("home")
+	if len(v.Devices) != 0 || !v.DevicesAt.IsZero() {
+		t.Fatalf("%+v", v)
+	}
+	if cs := e.cfgServer("home"); len(cs.Devices) != 0 || !cs.DevicesAt.IsZero() {
+		t.Fatalf("cached devices kept: %+v", cs)
+	}
+}
+
+func TestDevicesCachedAcrossRestart(t *testing.T) {
+	e := newEnv(t, cfgWith(srvCfg("home")))
+	t1 := t0.Add(time.Hour)
+	e.clock.Set(t1)
+	s := e.ready("home", tunnel.Device{DeviceInfo: tunnel.DeviceInfo{Name: "a", DeviceID: "id-a", StartedAt: t0}, Online: true},
+		dev("b", "id-b", false), dev("me", "self", true))
+	if err := e.m.SetForward("home", "a", true); err != nil {
+		t.Fatal(err)
+	}
+	t2 := t1.Add(time.Minute)
+	e.clock.Set(t2)
+	e.refreshNow("home", s) // a still online: LastSeen=t2 kept in memory, written at shutdown
+
+	e2 := e.reopen()
+	v := e2.view("home")
+	if len(v.Devices) != 2 || v.Devices[0].Name != "a" || v.Devices[1].Name != "b" {
+		t.Fatalf("cached devices %+v", v.Devices)
+	}
+	a := v.Devices[0]
+	if a.Online || !a.On || a.Port != 5102 || !a.LastSeen.Equal(t2) {
+		t.Fatalf("a %+v", a)
+	}
+	if !v.DevicesAt.Equal(t2) || v.Online != 0 {
+		t.Fatalf("%+v", v)
+	}
+}
+
+func TestRefreshSavesOnlyOnChange(t *testing.T) {
+	e := newEnv(t, cfgWith(srvCfg("home")))
+	s := e.ready("home", dev("a", "id-a", true))
+	e.m.mu.Lock()
+	n := e.m.saves
+	e.m.mu.Unlock()
+	t1 := t0.Add(time.Hour)
+	e.clock.Set(t1)
+	e.refreshNow("home", s)
+	e.refreshNow("home", s)
+	e.m.mu.Lock()
+	same := e.m.saves == n
+	e.m.mu.Unlock()
+	if !same {
+		t.Fatal("config rewritten on an unchanged refresh")
+	}
+	s.setDevices(dev("a", "id-a", false))
+	e.refreshNow("home", s) // drain any in-flight refresh that still saw a online
+	e.clock.Set(t1.Add(time.Hour))
+	e.refreshNow("home", s)
+	if ls := e.cfgServer("home").LastSeen["a"]; !ls.Equal(t1) {
+		t.Fatalf("last seen on disk %v, want %v", ls, t1)
+	}
+}
+
+func TestRefreshAfterStop(t *testing.T) {
+	e := newEnv(t, cfgWith(srvCfg("home")))
+	e.cancel()
+	e.m.wg.Wait()
+	e.mu.Lock()
+	n := e.detects
+	e.mu.Unlock()
+	e.m.Refresh("home")
+	time.Sleep(20 * time.Millisecond)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.detects != n {
+		t.Fatal("background work started after stop")
+	}
 }

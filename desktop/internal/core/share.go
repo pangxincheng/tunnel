@@ -276,6 +276,9 @@ func (m *Manager) SetShareSystem(server string, system bool) error {
 	}
 	if st.Installed {
 		old := installedSystem(st, sc.Share.System)
+		if _, err := m.localSSHPort(); err != nil { // check before removing the old service
+			return err
+		}
 		if err := m.uninstallShare(s, server, old); err != nil {
 			return err
 		}

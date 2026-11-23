@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pangxincheng/tunnel/tunnel"
 )
 
 func TestLoadMissing(t *testing.T) {
@@ -40,14 +42,16 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	c.Servers = []Server{{
 		Name: "home", Host: "h.example", User: "u", KeyPath: "/k", HostKey: "ssh-ed25519 AAA", SocketDir: "/s", Port: 2222,
 		Disconnected: true, Share: ShareIntent{On: true, Name: "mac", System: true},
-		Forwards: map[string]Forward{"d1": {Port: 5102, On: true}},
-		LastSeen: map[string]time.Time{"d1": time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)},
+		Forwards:  map[string]Forward{"d1": {Port: 5102, On: true}},
+		LastSeen:  map[string]time.Time{"d1": time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)},
+		Devices:   []tunnel.DeviceInfo{{DeviceID: "id1", Name: "d1", OS: "linux", StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}},
+		DevicesAt: time.Date(2026, 1, 2, 3, 4, 6, 0, time.UTC),
 	}}
 	if err := Save(p, c); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(p)
-	for _, k := range []string{"host_key", "socket_dir", "last_seen", "restore_forwards", "launch_at_login", "key_path"} {
+	for _, k := range []string{"host_key", "socket_dir", "last_seen", "restore_forwards", "launch_at_login", "key_path", "devices", "devices_at", "device_id"} {
 		if !strings.Contains(string(raw), `"`+k+`"`) {
 			t.Errorf("missing json key %s", k)
 		}
@@ -58,7 +62,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	s, ok := got.Server("home")
 	if !ok || s.Host != "h.example" || s.Port != 2222 || !s.Disconnected || !s.Share.System ||
-		s.Forwards["d1"].Port != 5102 || !s.LastSeen["d1"].Equal(c.Servers[0].LastSeen["d1"]) {
+		s.Forwards["d1"].Port != 5102 || !s.LastSeen["d1"].Equal(c.Servers[0].LastSeen["d1"]) ||
+		len(s.Devices) != 1 || s.Devices[0].Name != "d1" || s.Devices[0].OS != "linux" ||
+		!s.Devices[0].StartedAt.Equal(c.Servers[0].Devices[0].StartedAt) || !s.DevicesAt.Equal(c.Servers[0].DevicesAt) {
 		t.Fatalf("%+v", s)
 	}
 	if got.Selected != "home" || got.Settings.Accent != "violet" || got.Settings.RestoreForwards {

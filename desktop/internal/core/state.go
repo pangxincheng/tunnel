@@ -79,7 +79,7 @@ func (m *Manager) State() AppState {
 
 func (m *Manager) serverViewLocked(sc *config.Server, s *server) ServerView {
 	v := ServerView{Name: sc.Name, Host: sc.Host, User: sc.User, Port: sc.Port,
-		DevicesAt: s.devicesAt, Devices: []DeviceView{}}
+		DevicesAt: sc.DevicesAt, Devices: []DeviceView{}}
 	switch {
 	case sc.Disconnected:
 		v.Conn = "disconnected"
