@@ -1,2 +1,6 @@
 .DS_Store
 .superpowers/
+desktop/bin/
+desktop/frontend/node_modules/
+desktop/frontend/dist/
+desktop/build/bin/
