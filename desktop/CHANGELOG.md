@@ -1,6 +1,7 @@
 # CHANGELOG
 
 ## 2026-11-23
+- 附带 CLI 的版本号:自最近的 `cli/v*` tag 以来 `cli/` 未改动时直接用该 tag(tag 打在只改桌面端的提交上也能识别),否则仍取最近一次改动 `cli/` 的提交的 `git describe`。
 - 并入 tunnel monorepo 的 `desktop/`:Go 模块改名 `github.com/pangxincheng/tunnel/desktop`,依赖改为 `github.com/pangxincheng/tunnel/cli` + `replace … => ../cli`(同一提交,不再需要同步 tunnel 版本),import 同步改为 `…/cli/tunnel`,`tool` 指令改为 `…/cli/cmd/tunnel`;重新生成 bindings(路径 `bindings/github.com/pangxincheng/tunnel/desktop/…`,内容不变),`api.ts` 引用同步。删除 `tunnel:bump` 任务与 `tunnelversion_test.go`(不再有版本可选)。`bundle:tunnel` 从 `../cli` 编译附带 CLI,版本号改为 `git describe` 最近一次改动 `cli/` 的提交(相对 `cli/v*` 或旧 `v*` tag),只改桌面端时不变,避免无故提示「更新共享服务」。发布工作流改由 `desktop/v*` tag 触发:测试同时跑 `cli/` 的测试,构建任务取完整历史,产物名与版本号去掉 `desktop/` 前缀,Release 标题「Tunnel 桌面端 vX.Y.Z」,去掉「go.mod 不得 replace」检查。nfpm 主页改为 tunnel 仓库;README 的「tunnel 的版本」改为「与 cli/ 的关系」,「发布」改为 `desktop/v*` 与 `desktop-release-notes.sh`。App 的标识(`com.pangxincheng.tunnel-app`、可执行文件 `tunnel-app`、配置目录 `tunnel-app/`)不变,已有配置照常使用。
 - tunnel 依赖固定为已发布的 v1.3.0(`wails3 task tunnel:bump V=v1.3.0`):去掉 `go.mod` 中指向 `../../tunnel` 的 replace,附带的 CLI 也随之为 v1.3.0(支持 `status --json` / `set-name`);全部 Go 测试通过,`TestTunnelModuleAtLeastMinimum` 实际校验(不再跳过)。
 - 新增 `wails3 task tunnel:bump V=vX.Y.Z`:去掉本地 replace、`go get github.com/pangxincheng/tunnel@V`、`go mod tidy`、构建前端并跑 `go test ./...`,`go.mod` 仍是 tunnel 版本(Go 库与附带 CLI)的唯一来源;缺少或格式错误的 `V` 给出明确提示。新增 `tunnelversion_test.go`:`go.mod` 要求的 tunnel 低于 `minTunnel`(v1.3.0,附带 CLI 需支持 `status --json` / `set-name`)时测试失败,使用 replace 时跳过(此前固定到 v1.2.0 时所有测试仍通过)。README 的「go.mod 的 replace」改为「tunnel 的版本」。

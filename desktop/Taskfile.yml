@@ -27,16 +27,22 @@ tasks:
   bundle:tunnel:
     summary: Builds the tunnel CLI (../cli, same commit) into bin/ so packaging can ship it next to the app
     vars:
-      # Version of the bundled CLI: `git describe` of the last commit that
-      # touched ../cli, e.g. "v1.4.0" on a cli/v1.4.0 tag or
-      # "v1.4.0-3-gabc1234" after it. Desktop-only commits keep it unchanged,
-      # so the app does not ask to update the share service for nothing.
-      # Needs full history (CI: fetch-depth 0); falls back to "dev", which
-      # turns the app's outdated-service check off.
-      CLI_COMMIT:
-        sh: git log -1 --format=%H -- ../cli 2>/dev/null || echo HEAD
+      # Version of the bundled CLI. If ../cli is unchanged since the nearest
+      # cli/v* tag, it is that tag (e.g. "v1.4.0"), wherever the tag sits;
+      # otherwise `git describe` of the last commit that touched ../cli
+      # (e.g. "v1.4.0-3-gabc1234"). Desktop-only commits leave it unchanged, so
+      # the app does not ask to update the share service for nothing. Needs
+      # full history (CI: fetch-depth 0); falls back to "dev", which turns the
+      # app's outdated-service check off.
       CLI_DESCRIBE:
-        sh: git describe --tags --match "cli/v*" --match "v[0-9]*" {{.CLI_COMMIT}} 2>/dev/null || echo dev
+        sh: |
+          t=$(git describe --tags --abbrev=0 --match "cli/v*" --match "v[0-9]*" 2>/dev/null) || t=""
+          if [ -n "$t" ] && git diff --quiet "$t" HEAD -- ../cli 2>/dev/null; then
+            echo "$t"
+          else
+            c=$(git log -1 --format=%H -- ../cli 2>/dev/null) || c=HEAD
+            git describe --tags --match "cli/v*" --match "v[0-9]*" "$c" 2>/dev/null || echo dev
+          fi
       TUNNEL_VERSION: '{{trimPrefix "cli/" .CLI_DESCRIBE}}'
       TARGET_OS: '{{.GOOS}}'
       EXE: '{{if eq .GOOS "windows"}}.exe{{end}}'

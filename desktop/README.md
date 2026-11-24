@@ -53,7 +53,7 @@ go test ./...
 
 桌面端是 monorepo 的一部分:`go.mod` 用 `replace github.com/pangxincheng/tunnel/cli => ../cli` 直接依赖**同一提交**里的 Go 库,`bundle:tunnel` 也从 `../cli` 编出随包附带的 tunnel CLI,所以不存在「App 依赖哪个 tunnel 版本」需要同步的问题。改动 App 依赖的 CLI 行为(`status --json`、`set-name`、安装参数等)时,把 `cli/` 与 `desktop/` 的改动放进同一个提交,并分别记入两边的 CHANGELOG。
 
-附带 CLI 的版本号由 `git describe` 得出:取最近一次改动 `cli/` 的提交,相对最近的 `cli/v*`(或旧的 `v*`)tag 描述,如 `v1.4.0` 或 `v1.4.0-3-gabc1234`。只改桌面端时它不变,App 就不会无故提示「更新共享服务」;没有 git 历史时为 `dev`(关闭该提示)。
+附带 CLI 的版本号由 git 得出:自最近的 `cli/v*` tag 以来 `cli/` 没有改动时就是该 tag(如 `v1.4.0`,tag 打在哪个提交上都行);否则是最近一次改动 `cli/` 的提交的 `git describe`(如 `v1.4.0-3-gabc1234`)。只改桌面端时它不变,App 就不会无故提示「更新共享服务」;没有 git 历史时为 `dev`(关闭该提示)。
 
 ## 发布
 
