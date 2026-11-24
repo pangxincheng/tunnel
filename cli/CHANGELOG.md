@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-11-24
+- 改为与桌面端同步发布:由统一的 `vX.Y.Z` tag(自 `v1.5.0` 起)经 `.github/workflows/release.yml` 构建 6 个平台的 `tunnel_<tag>_<os>_<arch>` 压缩包,版本号注入 tag 本身;工作流随后自动补 `cli/vX.Y.Z` 供 `go install`。README 徽章改指 `release.yml` 与 `v*` 版本。
+
 ## 2026-11-23
 - 仓库改为 monorepo:命令行代码(`cmd/`、`internal/`、`tunnel/`、`go.mod`、`tunnel.toml.example`、本 README 与 CHANGELOG)移入 `cli/`,Go 模块路径改为 `github.com/pangxincheng/tunnel/cli`(库包 `github.com/pangxincheng/tunnel/cli/tunnel`,版本注入 `-X github.com/pangxincheng/tunnel/cli/tunnel.Version=…`)。旧模块路径 `github.com/pangxincheng/tunnel` 停留在 v1.3.0。发布工作流改名 `release-cli.yml`,改由 `cli/v*` tag 触发,版本号去掉 `cli/` 前缀,产物仍为 `tunnel_<版本>_<os>_<arch>`;README 徽章、编译步骤、库的 import 路径与文档链接同步。
 - tunnel-app 一期设计文档已同步:§6.4 / §9 服务名改为 `tunnel-<profile>`,并补充 `--for-user`、`status --json` 的 `mode` 与退出码 3 / 4、`set-name`(原待办项已完成)。

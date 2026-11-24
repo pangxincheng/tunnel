@@ -5,8 +5,8 @@
 <h1 align="center">tunnel</h1>
 
 <p align="center">
-  <a href="https://github.com/pangxincheng/tunnel/releases"><img src="https://img.shields.io/github/v/release/pangxincheng/tunnel?filter=desktop%2F*&label=desktop&style=flat-square" alt="desktop release"></a>
-  <a href="https://github.com/pangxincheng/tunnel/releases"><img src="https://img.shields.io/github/v/release/pangxincheng/tunnel?filter=!desktop%2F*&label=cli&style=flat-square" alt="cli release"></a>
+  <a href="https://github.com/pangxincheng/tunnel/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/pangxincheng/tunnel/release.yml?style=flat-square" alt="release"></a>
+  <a href="https://github.com/pangxincheng/tunnel/releases"><img src="https://img.shields.io/github/v/release/pangxincheng/tunnel?filter=v*&style=flat-square" alt="release version"></a>
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License">
 </p>
 
@@ -22,10 +22,10 @@
 
 ## 下载
 
-在 [Releases](https://github.com/pangxincheng/tunnel/releases) 页面：
+命令行和桌面 App 同步发布，版本号相同。在 [Releases](https://github.com/pangxincheng/tunnel/releases) 页面的同一个版本里：
 
-- **桌面 App**：标题为「Tunnel 桌面端 vX.Y.Z」的版本（tag `desktop/vX.Y.Z`），按系统下载 `.dmg`、Windows 安装程序、`.deb` 或 `.rpm`。
-- **命令行**：tag 为 `cli/vX.Y.Z` 的版本，按系统下载 `tunnel_<版本>_<os>_<arch>` 压缩包。用法见 [`cli/README.md`](cli/README.md)。
+- **桌面 App**：按系统下载 `tunnel-app_*` 开头的 `.dmg`、Windows 安装程序、`.deb` 或 `.rpm`。
+- **命令行**：按系统下载 `tunnel_<版本>_<os>_<arch>` 压缩包，或用 `go install github.com/pangxincheng/tunnel/cli/cmd/tunnel@latest` 安装。用法见 [`cli/README.md`](cli/README.md)。
 
 ## 开发
 

@@ -17,12 +17,9 @@ This project is **not** deployed through `nginx-configuration`; it ships as rele
 
 ## Releases
 
-Each part is released by its own tag (Go's convention for nested modules):
+The CLI and the desktop app are released **together, with one tag** `vX.Y.Z` (starting at `v1.5.0`; `-beta.N` style suffixes make a pre-release). Pushing it runs `.github/workflows/release.yml`: tests, CLI binaries for 6 platforms, desktop packages (dmg / NSIS / deb / rpm), one GitHub Release with notes from `.github/scripts/release-notes.sh` (the annotated tag message as highlights, then the CHANGELOG lines added in `desktop/` and `cli/` since the previous version). Write the user-facing highlights into the tag: `git tag -a vX.Y.Z -F notes.md`.
 
-- `cli/vX.Y.Z` → `.github/workflows/release-cli.yml` (CLI binaries for 6 platforms).
-- `desktop/vX.Y.Z` → `.github/workflows/release-desktop.yml` (dmg / NSIS / deb / rpm; release notes from `.github/scripts/release-notes.sh`).
-
-The old root module `github.com/pangxincheng/tunnel` (tags `v1.0.0`–`v1.3.0`) is frozen; do not create bare `v*` tags any more.
+The workflow then adds `cli/vX.Y.Z` on the same commit by itself, because Go resolves the nested module `github.com/pangxincheng/tunnel/cli` only from `cli/`-prefixed tags. Do not create `cli/v*` or `desktop/v*` tags by hand. Older tags stay as they are: `v1.0.0`–`v1.3.0` (the pre-monorepo root module), `cli/v1.4.0` and `desktop/v1.0.0-beta.*` (the short-lived separate releases).
 
 ---
 

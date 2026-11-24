@@ -1,21 +1,21 @@
-# 桌面端发布工作流:推送形如 desktop/v1.2.3(可带 -beta.1 这类后缀)的 tag 即触发
-# (命令行用 cli/v*,见 release-cli.yml)。桌面端代码在 desktop/,经 replace 直接使用同一提交的 cli/。
-# 流程:测试 → 4 个安装包并行构建 → 汇总、生成版本说明、创建 GitHub Release。
+# 统一发布工作流:推送形如 v1.5.0(可带 -beta.1 这类后缀)的 tag,命令行与桌面端同步发布到同一个 Release。
 #
-#   macOS arm64 / amd64   .dmg            macos-latest(Apple 芯片,amd64 交叉编译)
-#   Windows amd64         NSIS 安装程序    ubuntu(无 CGO,交叉编译 + apt 的 makensis)
-#   Linux amd64           .deb / .rpm      ubuntu
+#   命令行   tunnel_<tag>_<os>_<arch>.tar.gz / .zip   linux / darwin / windows × amd64 / arm64(CGO_ENABLED=0)
+#   桌面端   tunnel-app_<tag>_macos_arm64.dmg / _macos_amd64.dmg   macos-latest(amd64 交叉编译)
+#            tunnel-app_<tag>_windows_amd64_installer.exe            ubuntu(无 CGO 交叉编译 + apt 的 makensis)
+#            tunnel-app_<tag>_linux_amd64.deb / .rpm                 ubuntu-24.04(GTK4 + WebKitGTK 6.0)
 #
-# 版本号取自 tag(去掉 desktop/ 与 v):注入 main.version(「关于 Tunnel」显示),并由
-# desktop/build/set_version.py 写进 Info.plist、Windows 版本信息与 nfpm。附带的 tunnel CLI
-# 版本由 git describe 得出(需完整历史)。版本说明见 .github/scripts/desktop-release-notes.sh。
+# 版本号:命令行注入 tag 本身(v1.5.0);App 注入去掉 v 的版本(「关于 Tunnel」显示),并由
+# desktop/build/set_version.py 写进各平台打包元数据;App 附带的 tunnel CLI 版本由 git describe 得出,
+# 发布时即该 tag。发布后自动在同一提交上补 cli/<tag>,让 `go install …/cli/cmd/tunnel@latest` 能取到
+# 新版本(Go 子目录模块的 tag 必须带目录前缀)。版本说明见 .github/scripts/release-notes.sh。
 # 带 - 的 tag 发布为预发布版本。
-name: release-desktop
+name: release
 
 on:
   push:
     tags:
-      - "desktop/v[0-9]+.[0-9]+.[0-9]+*"
+      - "v[0-9]+.[0-9]+.[0-9]+*"
 
 permissions:
   contents: read
@@ -26,16 +26,15 @@ env:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    defaults:
-      run:
-        working-directory: desktop
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
           go-version-file: desktop/go.mod
-          cache-dependency-path: desktop/go.sum
+          cache-dependency-path: |
+            cli/go.sum
+            desktop/go.sum
 
       - uses: actions/setup-node@v4
         with:
@@ -48,6 +47,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev libx11-dev
 
+      - name: 命令行测试
+        working-directory: cli
+        run: go test ./... -count=1
+
       - name: 前端测试与构建
         working-directory: desktop/frontend
         run: |
@@ -56,12 +59,55 @@ jobs:
           npx tsc --noEmit
           npm run build
 
-      - name: Go 测试(桌面端与其依赖的 cli/)
-        run: |
-          go test ./... -count=1
-          (cd ../cli && go test ./... -count=1)
+      - name: 桌面端 Go 测试
+        working-directory: desktop
+        run: go test ./... -count=1
 
-  build:
+  build-cli:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, windows, darwin]
+        goarch: [amd64, arm64]
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: 编译并打包(版本注入 + 静态编译,含配置样例与许可证)
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          BIN=tunnel
+          if [ "$GOOS" = "windows" ]; then BIN=tunnel.exe; fi
+          mkdir -p build dist
+          go build -trimpath -ldflags "-s -w -X github.com/pangxincheng/tunnel/cli/tunnel.Version=$GITHUB_REF_NAME" \
+            -o "build/$BIN" ./cmd/tunnel
+          cp tunnel.toml.example ../LICENSE build/
+          NAME="tunnel_${GITHUB_REF_NAME}_${GOOS}_${GOARCH}"
+          if [ "$GOOS" = "windows" ]; then
+            (cd build && zip "../dist/${NAME}.zip" tunnel.exe tunnel.toml.example LICENSE)
+          else
+            tar czf "dist/${NAME}.tar.gz" -C build tunnel tunnel.toml.example LICENSE
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: cli/dist/*
+          if-no-files-found: error
+
+  build-desktop:
     needs: test
     strategy:
       fail-fast: false
@@ -102,10 +148,7 @@ jobs:
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}
 
       - name: 写入版本号
-        run: |
-          TAG_VERSION="${GITHUB_REF_NAME#desktop/}"   # v1.2.3,用于文件名
-          echo "TAG_VERSION=$TAG_VERSION" >> "$GITHUB_ENV"
-          echo "VERSION=$(python3 build/set_version.py "$TAG_VERSION")" >> "$GITHUB_ENV"
+        run: echo "VERSION=$(python3 build/set_version.py "$GITHUB_REF_NAME")" >> "$GITHUB_ENV"
 
       - name: 安装 NSIS
         if: matrix.target == 'windows_amd64'
@@ -116,14 +159,14 @@ jobs:
         run: |
           wails3 task darwin:package:dmg ARCH=${{ matrix.arch }} VERSION="$VERSION"
           mkdir -p dist
-          mv bin/tunnel-app.dmg "dist/tunnel-app_${TAG_VERSION}_${{ matrix.target }}.dmg"
+          mv bin/tunnel-app.dmg "dist/tunnel-app_${GITHUB_REF_NAME}_${{ matrix.target }}.dmg"
 
       - name: 打包 Windows(NSIS 安装程序)
         if: matrix.target == 'windows_amd64'
         run: |
           wails3 task windows:package ARCH=amd64 GOOS=windows VERSION="$VERSION"
           mkdir -p dist
-          mv bin/tunnel-app-amd64-installer.exe "dist/tunnel-app_${TAG_VERSION}_windows_amd64_installer.exe"
+          mv bin/tunnel-app-amd64-installer.exe "dist/tunnel-app_${GITHUB_REF_NAME}_windows_amd64_installer.exe"
 
       - name: 打包 Linux(.deb / .rpm)
         if: matrix.target == 'linux_amd64'
@@ -133,17 +176,17 @@ jobs:
           wails3 task linux:create:deb ARCH=amd64 VERSION="$VERSION"
           wails3 task linux:create:rpm ARCH=amd64 VERSION="$VERSION"
           mkdir -p dist
-          mv bin/*.deb "dist/tunnel-app_${TAG_VERSION}_linux_amd64.deb"
-          mv bin/*.rpm "dist/tunnel-app_${TAG_VERSION}_linux_amd64.rpm"
+          mv bin/*.deb "dist/tunnel-app_${GITHUB_REF_NAME}_linux_amd64.deb"
+          mv bin/*.rpm "dist/tunnel-app_${GITHUB_REF_NAME}_linux_amd64.rpm"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.target }}
+          name: desktop_${{ matrix.target }}
           path: desktop/dist/*
           if-no-files-found: error
 
   release:
-    needs: build
+    needs: [build-cli, build-desktop]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -166,21 +209,27 @@ jobs:
         run: sha256sum -- * > SHA256SUMS
 
       - name: 生成版本说明
-        run: .github/scripts/desktop-release-notes.sh "$GITHUB_REF_NAME" > notes.md
+        run: .github/scripts/release-notes.sh "$GITHUB_REF_NAME" > notes.md
 
-      # --notes 的内容放在最前,GitHub 自动生成的 PR 列表与对比链接接在后面。
-      # 对比起点限定为上一个 desktop/v* tag(否则可能取到 cli/v* 的发布);
-      # 第一次发布没有起点,不追加自动生成的部分。
+      # --notes 的内容放在最前,GitHub 自动生成的 PR 列表与对比链接接在后面,
+      # 起点与版本说明相同(上一个 v* 版本);没有上一个版本时不追加。
       - name: 创建 Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           extra=()
           case "$GITHUB_REF_NAME" in *-*) extra+=(--prerelease) ;; esac
-          prev="$(git describe --tags --abbrev=0 --match 'desktop/v[0-9]*' "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          prev="$(.github/scripts/release-notes.sh --prev "$GITHUB_REF_NAME")"
           if [ -n "$prev" ]; then extra+=(--generate-notes --notes-start-tag "$prev"); fi
           gh release create "$GITHUB_REF_NAME" dist/* \
             --verify-tag \
-            --title "Tunnel 桌面端 ${GITHUB_REF_NAME#desktop/}" \
+            --title "Tunnel $GITHUB_REF_NAME" \
             --notes "$(cat notes.md)" \
             "${extra[@]}"
+
+      # Go 子目录模块 github.com/pangxincheng/tunnel/cli 只认 cli/ 前缀的 tag。
+      # 用 GITHUB_TOKEN 推送的 tag 不会再触发任何工作流。
+      - name: 补 cli/ 前缀的 tag(供 go install)
+        run: |
+          git tag "cli/${GITHUB_REF_NAME}" "${GITHUB_REF_NAME}^{commit}"
+          git push origin "refs/tags/cli/${GITHUB_REF_NAME}"

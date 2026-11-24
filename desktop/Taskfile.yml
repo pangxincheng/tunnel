@@ -28,7 +28,7 @@ tasks:
     summary: Builds the tunnel CLI (../cli, same commit) into bin/ so packaging can ship it next to the app
     vars:
       # Version of the bundled CLI. If ../cli is unchanged since the nearest
-      # cli/v* tag, it is that tag (e.g. "v1.4.0"), wherever the tag sits;
+      # version tag (v*, or a legacy cli/v*), it is that tag (e.g. "v1.5.0");
       # otherwise `git describe` of the last commit that touched ../cli
       # (e.g. "v1.4.0-3-gabc1234"). Desktop-only commits leave it unchanged, so
       # the app does not ask to update the share service for nothing. Needs

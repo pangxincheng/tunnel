@@ -1,6 +1,7 @@
 # CHANGELOG
 
 ## 2026-11-24
+- 改为与命令行同步发布:由统一的 `vX.Y.Z` tag(自 `v1.5.0` 起)经 `.github/workflows/release.yml` 打包,与命令行同在一个 Release;版本说明改由 `.github/scripts/release-notes.sh` 生成(桌面端与命令行两节)。附带 CLI 的版本号在发布时即该 tag。README「发布」一节同步。
 - 主题(深色类名与主题色)改在 `useLayoutEffect` 中写到 `<html>`,与内容在同一次提交生效:启动时不再先闪一帧浅色;也修复了 CI 中偶发失败的 `puts the theme on the document element too`(内容出现时 `useEffect` 可能尚未执行,本地无法复现,按时序分析修复)。
 
 ## 2026-11-23

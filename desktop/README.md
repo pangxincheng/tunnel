@@ -53,11 +53,11 @@ go test ./...
 
 桌面端是 monorepo 的一部分:`go.mod` 用 `replace github.com/pangxincheng/tunnel/cli => ../cli` 直接依赖**同一提交**里的 Go 库,`bundle:tunnel` 也从 `../cli` 编出随包附带的 tunnel CLI,所以不存在「App 依赖哪个 tunnel 版本」需要同步的问题。改动 App 依赖的 CLI 行为(`status --json`、`set-name`、安装参数等)时,把 `cli/` 与 `desktop/` 的改动放进同一个提交,并分别记入两边的 CHANGELOG。
 
-附带 CLI 的版本号由 git 得出:自最近的 `cli/v*` tag 以来 `cli/` 没有改动时就是该 tag(如 `v1.4.0`,tag 打在哪个提交上都行);否则是最近一次改动 `cli/` 的提交的 `git describe`(如 `v1.4.0-3-gabc1234`)。只改桌面端时它不变,App 就不会无故提示「更新共享服务」;没有 git 历史时为 `dev`(关闭该提示)。
+附带 CLI 的版本号由 git 得出:自最近的版本 tag(`v*`,以及旧的 `cli/v*`)以来 `cli/` 没有改动时就是该 tag(如 `v1.5.0`,发布时即本次的版本号);否则是最近一次改动 `cli/` 的提交的 `git describe`(如 `v1.5.0-3-gabc1234`)。只改桌面端时它不变,App 就不会无故提示「更新共享服务」;没有 git 历史时为 `dev`(关闭该提示)。
 
 ## 发布
 
-推送形如 `desktop/v1.2.3`(可带 `-beta.1` 等后缀,带后缀的发布为预发布版本)的 tag,`.github/workflows/release-desktop.yml` 即自动测试(含 `cli/` 的测试)、构建并创建 GitHub Release。命令行另用 `cli/v*` tag 发布,两者互不触发。
+桌面端与命令行**同步发布**:推送一个形如 `v1.5.0`(可带 `-beta.1` 等后缀,带后缀的发布为预发布版本)的 tag,`.github/workflows/release.yml` 即测试两者、构建命令行(6 个平台)与下表的安装包,发布到同一个 GitHub Release。流程与 tag 约定见仓库根目录的 `AGENTS.md`(「Releases」)。
 
 | 安装包 | 构建方式 |
 |---|---|
@@ -65,16 +65,9 @@ go test ./...
 | Windows amd64 NSIS 安装程序 | ubuntu 上交叉编译(无 CGO)+ apt 的 `makensis` |
 | Linux amd64 `.deb` / `.rpm` | ubuntu-24.04(GTK4 + WebKitGTK 6.0) |
 
-产物命名为 `tunnel-app_<vX.Y.Z>_<系统>_<架构>`,另附 `SHA256SUMS`。版本号取自 tag:构建时以 `VERSION=<去掉 desktop/v 的 tag>` 注入 `main.version`(「关于 Tunnel」显示;本地构建为 `dev`),并由 `build/set_version.py` 写进 Info.plist、Windows 版本信息、NSIS 与 nfpm。不要用 `wails3 task common:update:build-assets` 改版本:它按模板重新生成这些文件,会丢掉随包附带 tunnel 等定制。
+产物命名为 `tunnel-app_<vX.Y.Z>_<系统>_<架构>`,另附 `SHA256SUMS`。版本号取自 tag:构建时以 `VERSION=<去掉 v 的 tag>` 注入 `main.version`(「关于 Tunnel」显示;本地构建为 `dev`),并由 `build/set_version.py` 写进 Info.plist、Windows 版本信息、NSIS 与 nfpm。不要用 `wails3 task common:update:build-assets` 改版本:它按模板重新生成这些文件,会丢掉随包附带 tunnel 等定制。
 
-**版本说明**由 `.github/scripts/desktop-release-notes.sh` 生成,依次为:
-
-1. 亮点:附注 tag 的说明。发布时把面向用户的要点写进 tag:`git tag -a desktop/v1.2.3 -F notes.md`(不写说明的轻量 tag 则省略这一段)。
-2. 下载与安装:固定的下载对照表与 macOS 首次打开的说明。
-3. 详细变更:本 tag 相对上一个 `desktop/v*` tag 在 `desktop/CHANGELOG.md` 中新增的行(第一次发布取整份);写了亮点时折叠在「详细变更」里。
-4. GitHub 自动生成的 PR 列表与「Full Changelog」对比链接(从上一个 `desktop/v*` tag 起;第一次发布没有这一段)。
-
-本地预览(在仓库根目录):`.github/scripts/desktop-release-notes.sh desktop/v1.2.3`(需先在本地打好该 tag)。
+**版本说明**由 `.github/scripts/release-notes.sh` 生成:附注 tag 的说明(亮点,`git tag -a v1.5.0 -F notes.md`)→ 桌面 App 与命令行的下载对照表 → 自上一版以来 `desktop/CHANGELOG.md` 与 `cli/CHANGELOG.md` 新增的行(分「桌面端」「命令行」,写了亮点时折叠)→ GitHub 自动生成的对比链接。本地预览(在仓库根目录):`.github/scripts/release-notes.sh v1.5.0`(需先在本地打好该 tag)。
 
 ## 已知缺口
 
