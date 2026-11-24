@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/godbus/dbus/v5 v5.2.2
-	github.com/pangxincheng/tunnel v1.2.0
+	github.com/pangxincheng/tunnel v1.3.0
 	github.com/wailsapp/wails/v3 v3.1.0
 	golang.org/x/sys v0.48.0
 )
@@ -24,7 +24,5 @@ require (
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	golang.org/x/term v0.46.0 // indirect
 )
-
-replace github.com/pangxincheng/tunnel => ../../tunnel
 
 tool github.com/pangxincheng/tunnel/cmd/tunnel
