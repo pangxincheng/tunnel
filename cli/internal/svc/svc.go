@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type Mode string
@@ -92,13 +93,17 @@ func WithFS(fs FS) Option { return func(m *manager) { m.fs = fs } }
 // WithUID 替换 launchd 用户域所用的 uid 来源(默认 os.Getuid)。
 func WithUID(f func() int) Option { return func(m *manager) { m.uid = f } }
 
+// WithSleep 替换等待所用的 sleep(默认 time.Sleep),测试用。
+func WithSleep(f func(time.Duration)) Option { return func(m *manager) { m.sleep = f } }
+
 type manager struct {
-	mode Mode
-	goos string
-	home string
-	r    Runner
-	fs   FS
-	uid  func() int
+	mode  Mode
+	goos  string
+	home  string
+	r     Runner
+	fs    FS
+	uid   func() int
+	sleep func(time.Duration)
 }
 
 // NewManager 返回对应平台的 Manager。goos/home 以参数传入,便于在任意平台测试。
@@ -115,7 +120,7 @@ func NewManager(mode Mode, goos string, home string, r Runner, opts ...Option) (
 	default:
 		return nil, errors.New("不支持的操作系统:" + goos)
 	}
-	m := &manager{mode: mode, goos: goos, home: home, r: r, fs: osFS{}, uid: os.Getuid}
+	m := &manager{mode: mode, goos: goos, home: home, r: r, fs: osFS{}, uid: os.Getuid, sleep: time.Sleep}
 	for _, o := range opts {
 		o(m)
 	}

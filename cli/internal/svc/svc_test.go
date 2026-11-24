@@ -7,17 +7,29 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeRunner struct {
 	cmds []string
 	fail map[string]error
+	seq  map[string][]error // per-command results, popped in order (then fail[c])
 }
 
 func (f *fakeRunner) Run(name string, args ...string) error {
 	c := strings.Join(append([]string{name}, args...), " ")
 	f.cmds = append(f.cmds, c)
-	return f.fail[c]
+	if q := f.seq[c]; len(q) > 0 {
+		f.seq[c] = q[1:]
+		return q[0]
+	}
+	if err, ok := f.fail[c]; ok {
+		return err
+	}
+	if strings.HasPrefix(c, "launchctl print ") { // by default a booted-out service is gone at once
+		return errors.New("Could not find service")
+	}
+	return nil
 }
 
 type fakeFS struct {
@@ -214,10 +226,13 @@ func TestInstallCommandSequence(t *testing.T) {
 	m.Install(spec(ModeUser))
 	eq(t, r.cmds, []string{
 		"launchctl bootout gui/501/com.pangxincheng.tunnel-default-nas",
+		"launchctl print gui/501/com.pangxincheng.tunnel-default-nas",
 		"launchctl bootstrap gui/501 /home/u/Library/LaunchAgents/com.pangxincheng.tunnel-default-nas.plist"})
 	r.cmds = nil
 	m.Uninstall("tunnel-default-nas")
-	eq(t, r.cmds, []string{"launchctl bootout gui/501/com.pangxincheng.tunnel-default-nas"})
+	eq(t, r.cmds, []string{
+		"launchctl bootout gui/501/com.pangxincheng.tunnel-default-nas",
+		"launchctl print gui/501/com.pangxincheng.tunnel-default-nas"})
 	if len(fs.files) != 0 {
 		t.Error(fs.files)
 	}
@@ -226,6 +241,7 @@ func TestInstallCommandSequence(t *testing.T) {
 	m.Install(spec(ModeSystem))
 	eq(t, r.cmds, []string{
 		"launchctl bootout system/com.pangxincheng.tunnel-default-nas",
+		"launchctl print system/com.pangxincheng.tunnel-default-nas",
 		"launchctl bootstrap system /Library/LaunchDaemons/com.pangxincheng.tunnel-default-nas.plist"})
 
 	m, r, fs = newMgr(t, ModeUser, "windows")
@@ -276,4 +292,73 @@ func TestStop(t *testing.T) {
 		}
 		eq(t, r.cmds, nil)
 	}
+}
+
+// bootout is asynchronous: bootstrapping the same label while the old
+// process is still exiting fails with "Bootstrap failed: 5: Input/output
+// error". Install waits until the old service is gone, and retries bootstrap.
+func TestLaunchdUpdateWaitsForBootout(t *testing.T) {
+	r, fs := &fakeRunner{seq: map[string][]error{}}, newFS()
+	var slept []time.Duration
+	m, err := NewManager(ModeSystem, "darwin", "/home/u", r, WithFS(fs),
+		WithSleep(func(d time.Duration) { slept = append(slept, d) }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := "system/com.pangxincheng.tunnel-default-nas"
+	plist := "/Library/LaunchDaemons/com.pangxincheng.tunnel-default-nas.plist"
+	gone := errors.New("Could not find service")
+	io := errors.New("Bootstrap failed: 5: Input/output error")
+	r.seq["launchctl print "+target] = []error{nil, nil, gone}    // still loaded twice, then gone
+	r.seq["launchctl bootstrap system "+plist] = []error{io, nil} // first attempt still races
+	if err := m.Install(spec(ModeSystem)); err != nil {
+		t.Fatal(err)
+	}
+	eq(t, r.cmds, []string{
+		"launchctl bootout " + target,
+		"launchctl print " + target,
+		"launchctl print " + target,
+		"launchctl print " + target,
+		"launchctl bootstrap system " + plist,
+		"launchctl bootstrap system " + plist,
+	})
+	if len(slept) != 3 {
+		t.Fatalf("slept %v", slept)
+	}
+}
+
+func TestLaunchdInstallGivesUp(t *testing.T) {
+	r, fs := &fakeRunner{seq: map[string][]error{}, fail: map[string]error{}}, newFS()
+	m, _ := NewManager(ModeSystem, "darwin", "/home/u", r, WithFS(fs), WithSleep(func(time.Duration) {}))
+	target := "system/com.pangxincheng.tunnel-default-nas"
+	io := errors.New("Bootstrap failed: 5: Input/output error")
+	r.fail["launchctl print "+target] = nil // never goes away
+	r.fail["launchctl bootstrap system /Library/LaunchDaemons/com.pangxincheng.tunnel-default-nas.plist"] = io
+	if err := m.Install(spec(ModeSystem)); !errors.Is(err, io) {
+		t.Fatalf("err %v", err)
+	}
+	prints, boots := 0, 0
+	for _, c := range r.cmds {
+		if strings.HasPrefix(c, "launchctl print") {
+			prints++
+		}
+		if strings.HasPrefix(c, "launchctl bootstrap") {
+			boots++
+		}
+	}
+	if prints != 50 || boots != 3 {
+		t.Fatalf("prints %d boots %d", prints, boots)
+	}
+}
+
+// Not loaded: bootout fails and there is nothing to wait for.
+func TestLaunchdFreshInstallSkipsWait(t *testing.T) {
+	r := &fakeRunner{fail: map[string]error{"launchctl bootout gui/501/com.pangxincheng.tunnel-default-nas": errors.New("No such process")}}
+	m, _ := NewManager(ModeUser, "darwin", "/home/u", r, WithFS(newFS()), WithUID(func() int { return 501 }), WithSleep(func(time.Duration) {}))
+	if err := m.Install(spec(ModeUser)); err != nil {
+		t.Fatal(err)
+	}
+	eq(t, r.cmds, []string{
+		"launchctl bootout gui/501/com.pangxincheng.tunnel-default-nas",
+		"launchctl bootstrap gui/501 /home/u/Library/LaunchAgents/com.pangxincheng.tunnel-default-nas.plist"})
 }

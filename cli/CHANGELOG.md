@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-11-24
+- 修复 macOS 上更新(重装)共享服务失败:`launchctl bootout` 是异步的,命令返回时旧的共享进程还在退出(退出前要撤销 VPS 上的 socket),紧接着 `launchctl bootstrap` 同名服务会报 `Bootstrap failed: 5: Input/output error`,服务因此被卸载却没装回去(在桌面端点「更新共享服务」、系统模式下复现)。现在 bootout 成功后用 `launchctl print` 每 200ms 检查一次、最多等 10 秒直到服务真正消失,bootstrap 失败再间隔 1 秒重试共 3 次;卸载也同样等待。`svc` 新增 `WithSleep` 选项;新增 `TestLaunchdUpdateWaitsForBootout`、`TestLaunchdInstallGivesUp`、`TestLaunchdFreshInstallSkipsWait`。
 - 新增 `RemoveOfflineDevice(ctx, sc, dir, name)` 与 `Session.RemoveOfflineDevice`:删除 VPS 上离线设备的记录(`<name>.json` 与残留的 `<name>.sock`),不论属于哪台设备;删除前重新探测 socket,在线则返回新哨兵错误 `ErrDeviceOnline`、什么都不删;名字经 `ValidateName` 校验(防路径穿越)。被删的设备下次连上服务器时会重新登记。桌面端的「删除设备」与自动清理用它。新增 `TestRemoveOfflineDevice`。
 - README「准备」一节建议在 VPS 的 sshd 加 `ClientAliveInterval 15` / `ClientAliveCountMax 4`:设备睡眠或换网络时不辞而别,旧会话要等 TCP 保活(Linux 默认约 2 小时 11 分钟)才被清掉,期间同一个 socket 有两个监听者(在测试 VPS 上实际观察到:Mac mini 约 21:15 断开后旧会话一直留着,22:24 重连的新会话已接管 socket 路径),不影响连接,但占着一个 sshd 进程。
 - 改为与桌面端同步发布:由统一的 `vX.Y.Z` tag(自 `v1.5.0` 起)经 `.github/workflows/release.yml` 构建 6 个平台的 `tunnel_<tag>_<os>_<arch>` 压缩包,版本号注入 tag 本身;工作流随后自动补 `cli/vX.Y.Z` 供 `go install`。README 徽章改指 `release.yml` 与 `v*` 版本。
