@@ -91,6 +91,13 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/frontend/package-lock.json
 
+      # Linux 上 wails3 命令行本身也链接 GTK4 / WebKitGTK,两个 ubuntu 任务都要在安装它之前装好。
+      - name: 安装 Linux 构建依赖
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev libx11-dev
+
       - name: 安装 wails3
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}
 
@@ -100,15 +107,9 @@ jobs:
           echo "TAG_VERSION=$TAG_VERSION" >> "$GITHUB_ENV"
           echo "VERSION=$(python3 build/set_version.py "$TAG_VERSION")" >> "$GITHUB_ENV"
 
-      - name: 安装 Linux 构建依赖
-        if: matrix.target == 'linux_amd64'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev libx11-dev
-
       - name: 安装 NSIS
         if: matrix.target == 'windows_amd64'
-        run: sudo apt-get update && sudo apt-get install -y nsis
+        run: sudo apt-get install -y nsis
 
       - name: 打包 macOS(.dmg)
         if: startsWith(matrix.target, 'macos_')
