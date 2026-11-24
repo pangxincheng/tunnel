@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pangxincheng/tunnel/desktop/internal/config"
 	"github.com/pangxincheng/tunnel/cli/tunnel"
+	"github.com/pangxincheng/tunnel/desktop/internal/config"
 	"golang.org/x/crypto/ssh"
 )
 

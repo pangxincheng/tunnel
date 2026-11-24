@@ -4,9 +4,9 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/pangxincheng/tunnel/cli/tunnel"
 	"github.com/pangxincheng/tunnel/desktop/internal/config"
 	"github.com/pangxincheng/tunnel/desktop/internal/sshd"
-	"github.com/pangxincheng/tunnel/cli/tunnel"
 )
 
 // AppState is the frontend's single source of truth.

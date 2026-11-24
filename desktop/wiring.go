@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pangxincheng/tunnel/cli/tunnel"
 	"github.com/pangxincheng/tunnel/desktop/internal/bundled"
 	"github.com/pangxincheng/tunnel/desktop/internal/config"
 	"github.com/pangxincheng/tunnel/desktop/internal/core"
 	"github.com/pangxincheng/tunnel/desktop/internal/sharesvc"
-	"github.com/pangxincheng/tunnel/cli/tunnel"
 )
 
 // configPathEnv overrides the config file location (isolated manual runs).

@@ -13,9 +13,9 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/pangxincheng/tunnel/cli/tunnel"
 	"github.com/pangxincheng/tunnel/desktop/internal/config"
 	"github.com/pangxincheng/tunnel/desktop/internal/sharesvc"
-	"github.com/pangxincheng/tunnel/cli/tunnel"
 )
 
 // server is the runtime state of one configured server. The pointer is
