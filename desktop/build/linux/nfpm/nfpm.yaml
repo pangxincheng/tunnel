@@ -12,7 +12,7 @@ priority: "extra"
 maintainer: pangxincheng <pangxincheng@foxmail.com>
 description: "Desktop app for tunnel: reach your devices by name through a VPS that only runs sshd"
 vendor: "pangxincheng"
-homepage: "https://github.com/pangxincheng/tunnel-app"
+homepage: "https://github.com/pangxincheng/tunnel"
 release: "1"
 
 contents:

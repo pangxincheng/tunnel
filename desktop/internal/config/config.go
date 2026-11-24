@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pangxincheng/tunnel/tunnel"
+	"github.com/pangxincheng/tunnel/cli/tunnel"
 )
 
 type Server struct {

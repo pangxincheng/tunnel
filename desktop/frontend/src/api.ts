@@ -1,12 +1,12 @@
 // The only module that imports the generated bindings and the Wails runtime.
 // Everything else imports from here (tests mock this module).
 import { Events } from '@wailsio/runtime'
-import * as AppService from '../bindings/github.com/pangxincheng/tunnel-app/desktop/appservice'
+import * as AppService from '../bindings/github.com/pangxincheng/tunnel/desktop/appservice'
 
-export type { AppState, ServerView, DeviceView, ShareView } from '../bindings/github.com/pangxincheng/tunnel-app/desktop/internal/core/models'
-export type { Settings, Server } from '../bindings/github.com/pangxincheng/tunnel-app/desktop/internal/config/models'
+export type { AppState, ServerView, DeviceView, ShareView } from '../bindings/github.com/pangxincheng/tunnel/desktop/internal/core/models'
+export type { Settings, Server } from '../bindings/github.com/pangxincheng/tunnel/desktop/internal/config/models'
 
-import type { AppState } from '../bindings/github.com/pangxincheng/tunnel-app/desktop/internal/core/models'
+import type { AppState } from '../bindings/github.com/pangxincheng/tunnel/desktop/internal/core/models'
 
 export const {
   GetState,

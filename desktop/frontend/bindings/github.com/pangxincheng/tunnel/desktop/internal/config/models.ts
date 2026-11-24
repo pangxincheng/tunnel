@@ -3,7 +3,7 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import * as tunnel$0 from "../../../../tunnel/tunnel/models.js";
+import * as tunnel$0 from "../../../cli/tunnel/models.js";
 
 export interface Forward {
     "port": number;

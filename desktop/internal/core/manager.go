@@ -21,10 +21,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pangxincheng/tunnel-app/desktop/internal/config"
-	"github.com/pangxincheng/tunnel-app/desktop/internal/sharesvc"
-	"github.com/pangxincheng/tunnel-app/desktop/internal/sshd"
-	"github.com/pangxincheng/tunnel/tunnel"
+	"github.com/pangxincheng/tunnel/desktop/internal/config"
+	"github.com/pangxincheng/tunnel/desktop/internal/sharesvc"
+	"github.com/pangxincheng/tunnel/desktop/internal/sshd"
+	"github.com/pangxincheng/tunnel/cli/tunnel"
 )
 
 // Session is the subset of *tunnel.Session the manager uses.

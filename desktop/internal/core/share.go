@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pangxincheng/tunnel-app/desktop/internal/config"
-	"github.com/pangxincheng/tunnel-app/desktop/internal/sharesvc"
-	"github.com/pangxincheng/tunnel/tunnel"
+	"github.com/pangxincheng/tunnel/desktop/internal/config"
+	"github.com/pangxincheng/tunnel/desktop/internal/sharesvc"
+	"github.com/pangxincheng/tunnel/cli/tunnel"
 )
 
 // The share service profile of a server is the server's name.

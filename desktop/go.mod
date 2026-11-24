@@ -1,10 +1,10 @@
-module github.com/pangxincheng/tunnel-app/desktop
+module github.com/pangxincheng/tunnel/desktop
 
 go 1.26.0
 
 require (
 	github.com/godbus/dbus/v5 v5.2.2
-	github.com/pangxincheng/tunnel v1.3.0
+	github.com/pangxincheng/tunnel/cli v0.0.0-00010101000000-000000000000
 	github.com/wailsapp/wails/v3 v3.1.0
 	golang.org/x/sys v0.48.0
 )
@@ -25,4 +25,6 @@ require (
 	golang.org/x/term v0.46.0 // indirect
 )
 
-tool github.com/pangxincheng/tunnel/cmd/tunnel
+replace github.com/pangxincheng/tunnel/cli => ../cli
+
+tool github.com/pangxincheng/tunnel/cli/cmd/tunnel

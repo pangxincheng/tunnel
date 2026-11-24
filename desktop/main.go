@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"sync/atomic"
 
-	"github.com/pangxincheng/tunnel-app/desktop/internal/core"
+	"github.com/pangxincheng/tunnel/desktop/internal/core"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 )

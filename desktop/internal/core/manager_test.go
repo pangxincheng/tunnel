@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pangxincheng/tunnel-app/desktop/internal/config"
-	"github.com/pangxincheng/tunnel-app/desktop/internal/sharesvc"
-	"github.com/pangxincheng/tunnel-app/desktop/internal/sshd"
-	"github.com/pangxincheng/tunnel/tunnel"
+	"github.com/pangxincheng/tunnel/desktop/internal/config"
+	"github.com/pangxincheng/tunnel/desktop/internal/sharesvc"
+	"github.com/pangxincheng/tunnel/desktop/internal/sshd"
+	"github.com/pangxincheng/tunnel/cli/tunnel"
 )
 
 func withForwards(s config.Server, fw map[string]config.Forward) config.Server {

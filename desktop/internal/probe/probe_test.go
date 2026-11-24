@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pangxincheng/tunnel/tunnel"
+	"github.com/pangxincheng/tunnel/cli/tunnel"
 	"golang.org/x/crypto/ssh"
 )
 

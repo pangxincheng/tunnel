@@ -25,42 +25,28 @@ includes:
 
 tasks:
   bundle:tunnel:
-    summary: Builds the tunnel CLI into bin/ so packaging can ship it next to the app
+    summary: Builds the tunnel CLI (../cli, same commit) into bin/ so packaging can ship it next to the app
     vars:
-      # "dev" when go.mod replaces the module with a local checkout.
-      TUNNEL_VERSION:
-        sh: go list -m -f '{{"{{"}}if .Replace{{"}}"}}dev{{"{{"}}else{{"}}"}}{{"{{"}}.Version{{"}}"}}{{"{{"}}end{{"}}"}}' github.com/pangxincheng/tunnel
+      # Version of the bundled CLI: `git describe` of the last commit that
+      # touched ../cli, e.g. "v1.4.0" on a cli/v1.4.0 tag or
+      # "v1.4.0-3-gabc1234" after it. Desktop-only commits keep it unchanged,
+      # so the app does not ask to update the share service for nothing.
+      # Needs full history (CI: fetch-depth 0); falls back to "dev", which
+      # turns the app's outdated-service check off.
+      CLI_COMMIT:
+        sh: git log -1 --format=%H -- ../cli 2>/dev/null || echo HEAD
+      CLI_DESCRIBE:
+        sh: git describe --tags --match "cli/v*" --match "v[0-9]*" {{.CLI_COMMIT}} 2>/dev/null || echo dev
+      TUNNEL_VERSION: '{{trimPrefix "cli/" .CLI_DESCRIBE}}'
       TARGET_OS: '{{.GOOS}}'
       EXE: '{{if eq .GOOS "windows"}}.exe{{end}}'
     cmds:
       - mkdir -p "{{.BIN_DIR}}"
-      - go build -trimpath -ldflags "-X github.com/pangxincheng/tunnel/tunnel.Version={{.TUNNEL_VERSION}}" -o "{{.BIN_DIR}}/tunnel{{.EXE}}" github.com/pangxincheng/tunnel/cmd/tunnel
+      - go build -trimpath -ldflags "-X github.com/pangxincheng/tunnel/cli/tunnel.Version={{.TUNNEL_VERSION}}" -o "{{.BIN_DIR}}/tunnel{{.EXE}}" github.com/pangxincheng/tunnel/cli/cmd/tunnel
     env:
       CGO_ENABLED: "0"
       GOOS: '{{.TARGET_OS}}'
       GOARCH: '{{.ARCH | default ARCH}}'
-
-  tunnel:bump:
-    summary: Pins tunnel (Go library and bundled CLI) to a released version, then runs all Go tests
-    desc: |
-      Usage: wails3 task tunnel:bump V=v1.3.1
-      go.mod is the single source of the tunnel version: the app compiles
-      against that library and bundle:tunnel builds the CLI from it. This drops
-      any local replace (../../tunnel), requires tunnel@V, tidies and tests.
-    requires:
-      vars: [V]
-    preconditions:
-      - sh: '{{if regexMatch "^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$" (.V | default "")}}true{{else}}false{{end}}'
-        msg: "V must be a tunnel release tag such as v1.3.1, got '{{.V}}'"
-    cmds:
-      - go mod edit -dropreplace=github.com/pangxincheng/tunnel
-      - go get github.com/pangxincheng/tunnel@{{.V}}
-      - go mod tidy
-      - task: common:build:frontend # go:embed needs frontend/dist
-      - go test ./...
-      # tunnelversion_test.go fails the line above when V is older than the
-      # app's minimum (v1.3.0): older CLIs lack status --json / set-name.
-      - echo "tunnel pinned to {{.V}}. Record it in CHANGELOG.md and commit go.mod / go.sum."
 
   build:
     summary: Builds the application

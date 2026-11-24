@@ -1,4 +1,4 @@
-# tunnel-app 桌面端
+# Tunnel 桌面端
 
 Wails v3.1.0(Go 后端 + React 18 / TypeScript / Vite 前端)。设计见 `../docs/superpowers/specs/2026-11-22-tunnel-app-phase1-design.md`。
 
@@ -49,21 +49,15 @@ go test ./...
 | `TUNNEL_APP_TUNNEL_BIN` | 指定要使用的 tunnel 可执行文件(默认用 App 旁边附带的那个;Linux deb / rpm 装在 `/usr/lib/tunnel-app/tunnel`,不进 PATH) |
 | `TUNNEL_APP_CONFIG` | 指定配置文件路径,用于隔离的试运行(默认在用户配置目录的 `tunnel-app/` 下) |
 
-## tunnel 的版本
+## 与 cli/ 的关系
 
-`go.mod` 是 tunnel 版本的唯一来源:App 编译时使用该版本的 Go 库,`bundle:tunnel` 也用同一版本编出随包附带的 CLI。升级(或固定)到某个已发布的 tunnel 版本:
+桌面端是 monorepo 的一部分:`go.mod` 用 `replace github.com/pangxincheng/tunnel/cli => ../cli` 直接依赖**同一提交**里的 Go 库,`bundle:tunnel` 也从 `../cli` 编出随包附带的 tunnel CLI,所以不存在「App 依赖哪个 tunnel 版本」需要同步的问题。改动 App 依赖的 CLI 行为(`status --json`、`set-name`、安装参数等)时,把 `cli/` 与 `desktop/` 的改动放进同一个提交,并分别记入两边的 CHANGELOG。
 
-```bash
-wails3 task tunnel:bump V=v1.3.1   # 去掉本地 replace → go get tunnel@V → go mod tidy → 构建前端 → go test ./...
-```
-
-然后在 `CHANGELOG.md` 记一笔并提交 `go.mod` / `go.sum`。App 至少需要 tunnel v1.3.0(附带的 CLI 要支持 `status --json` 与 `set-name`),`tunnelversion_test.go` 会让低于该版本的 `go.mod` 测试失败;最低版本变化时改其中的 `minTunnel`。
-
-与 tunnel 同时开发时,可临时 `go mod edit -replace github.com/pangxincheng/tunnel=../../tunnel` 指向同级检出(此时版本检查跳过),但不要提交:发布工作流会拒绝带 replace 的 `go.mod`。
+附带 CLI 的版本号由 `git describe` 得出:取最近一次改动 `cli/` 的提交,相对最近的 `cli/v*`(或旧的 `v*`)tag 描述,如 `v1.4.0` 或 `v1.4.0-3-gabc1234`。只改桌面端时它不变,App 就不会无故提示「更新共享服务」;没有 git 历史时为 `dev`(关闭该提示)。
 
 ## 发布
 
-推送形如 `v1.2.3`(可带 `-beta.1` 等后缀,带后缀的发布为预发布版本)的 tag,`.github/workflows/release-desktop.yml` 即自动测试、构建并创建 GitHub Release:
+推送形如 `desktop/v1.2.3`(可带 `-beta.1` 等后缀,带后缀的发布为预发布版本)的 tag,`.github/workflows/release-desktop.yml` 即自动测试(含 `cli/` 的测试)、构建并创建 GitHub Release。命令行另用 `cli/v*` tag 发布,两者互不触发。
 
 | 安装包 | 构建方式 |
 |---|---|
@@ -71,18 +65,16 @@ wails3 task tunnel:bump V=v1.3.1   # 去掉本地 replace → go get tunnel@V �
 | Windows amd64 NSIS 安装程序 | ubuntu 上交叉编译(无 CGO)+ apt 的 `makensis` |
 | Linux amd64 `.deb` / `.rpm` | ubuntu-24.04(GTK4 + WebKitGTK 6.0) |
 
-另附 `SHA256SUMS`。版本号取自 tag:构建时以 `VERSION=<去掉 v 的 tag>` 注入 `main.version`(「关于 Tunnel」显示;本地构建为 `dev`),并由 `build/set_version.py` 写进 Info.plist、Windows 版本信息、NSIS 与 nfpm。不要用 `wails3 task common:update:build-assets` 改版本:它按模板重新生成这些文件,会丢掉随包附带 tunnel 等定制。
+产物命名为 `tunnel-app_<vX.Y.Z>_<系统>_<架构>`,另附 `SHA256SUMS`。版本号取自 tag:构建时以 `VERSION=<去掉 desktop/v 的 tag>` 注入 `main.version`(「关于 Tunnel」显示;本地构建为 `dev`),并由 `build/set_version.py` 写进 Info.plist、Windows 版本信息、NSIS 与 nfpm。不要用 `wails3 task common:update:build-assets` 改版本:它按模板重新生成这些文件,会丢掉随包附带 tunnel 等定制。
 
-**发布前**:`go.mod` 不能再 `replace` 到本地 tunnel(工作流第一步会检查并失败),需 `require` 已打 tag 的 tunnel 版本。
+**版本说明**由 `.github/scripts/desktop-release-notes.sh` 生成,依次为:
 
-**版本说明**由 `.github/scripts/release-notes.sh` 生成,依次为:
-
-1. 亮点:附注 tag 的说明。发布时把面向用户的要点写进 tag:`git tag -a v1.2.3 -F notes.md`(不写说明的轻量 tag 则省略这一段)。
+1. 亮点:附注 tag 的说明。发布时把面向用户的要点写进 tag:`git tag -a desktop/v1.2.3 -F notes.md`(不写说明的轻量 tag 则省略这一段)。
 2. 下载与安装:固定的下载对照表与 macOS 首次打开的说明。
-3. 详细变更:本 tag 相对上一个 `v*` tag 在 `CHANGELOG.md` 中新增的行(第一次发布取整份);写了亮点时折叠在「详细变更」里。
-4. GitHub 自动生成的 PR 列表与「Full Changelog」对比链接(`gh release create --generate-notes`)。
+3. 详细变更:本 tag 相对上一个 `desktop/v*` tag 在 `desktop/CHANGELOG.md` 中新增的行(第一次发布取整份);写了亮点时折叠在「详细变更」里。
+4. GitHub 自动生成的 PR 列表与「Full Changelog」对比链接(从上一个 `desktop/v*` tag 起;第一次发布没有这一段)。
 
-本地预览:`.github/scripts/release-notes.sh v1.2.3`(需先在本地打好该 tag)。
+本地预览(在仓库根目录):`.github/scripts/desktop-release-notes.sh desktop/v1.2.3`(需先在本地打好该 tag)。
 
 ## 已知缺口
 

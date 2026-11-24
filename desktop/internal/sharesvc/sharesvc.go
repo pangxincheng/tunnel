@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pangxincheng/tunnel/tunnel"
+	"github.com/pangxincheng/tunnel/cli/tunnel"
 )
 
 // Runner 运行外部命令。实现应在一个全新的空工作目录中运行,

@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pangxincheng/tunnel-app/desktop/internal/config"
-	"github.com/pangxincheng/tunnel-app/desktop/internal/core"
-	"github.com/pangxincheng/tunnel-app/desktop/internal/probe"
-	"github.com/pangxincheng/tunnel-app/desktop/internal/sharesvc"
-	"github.com/pangxincheng/tunnel/tunnel"
+	"github.com/pangxincheng/tunnel/desktop/internal/config"
+	"github.com/pangxincheng/tunnel/desktop/internal/core"
+	"github.com/pangxincheng/tunnel/desktop/internal/probe"
+	"github.com/pangxincheng/tunnel/desktop/internal/sharesvc"
+	"github.com/pangxincheng/tunnel/cli/tunnel"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 

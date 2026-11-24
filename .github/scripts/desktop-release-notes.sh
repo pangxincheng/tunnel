@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
-# 生成 GitHub Release 的说明正文(Markdown,输出到 stdout)。
+# 生成桌面端 GitHub Release 的说明正文(Markdown,输出到 stdout)。
 #
-# 用法: .github/scripts/release-notes.sh <tag>
+# 用法: .github/scripts/desktop-release-notes.sh desktop/vX.Y.Z
 #
 # 正文由三部分组成,GitHub 再在末尾追加自动生成的部分(PR 列表与
-# 「Full Changelog: 上一版...本版」对比链接,见 release.yml 的 --generate-notes):
-#   1. 亮点:附注 tag 的说明(git tag -a vX.Y.Z -F notes.md)。没写就省略。
+# 「Full Changelog: 上一版...本版」对比链接,见 release-desktop.yml 的 --generate-notes):
+#   1. 亮点:附注 tag 的说明(git tag -a desktop/vX.Y.Z -F notes.md)。没写就省略。
 #   2. 下载与安装:固定的安装指引。
-#   3. 详细变更:本 tag 相对上一个 v* tag 在 CHANGELOG.md 中新增的行;
-#      第一次发布(没有上一个 tag)时取整份 CHANGELOG。写了亮点时折叠显示。
+#   3. 详细变更:本 tag 相对上一个 desktop/v* tag 在 desktop/CHANGELOG.md 中新增的行;
+#      第一次发布(没有上一个 tag)时取整份 desktop/CHANGELOG.md。写了亮点时折叠显示。
+# 只看 desktop/ 前缀的 tag,命令行的 cli/v* 与旧的 v* tag 都不算「上一版」。
 set -euo pipefail
 
-tag="${1:?用法: release-notes.sh <tag>}"
+tag="${1:?用法: desktop-release-notes.sh desktop/vX.Y.Z}"
+changelog="desktop/CHANGELOG.md"
 git rev-parse -q --verify "refs/tags/$tag" >/dev/null || { echo "找不到 tag $tag" >&2; exit 1; }
 
-# 上一个版本 tag(不含本 tag)。
-prev="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$tag^" 2>/dev/null || true)"
+# 上一个桌面端版本 tag(不含本 tag)。
+prev="$(git describe --tags --abbrev=0 --match 'desktop/v[0-9]*' "$tag^" 2>/dev/null || true)"
 
 # 1. 附注 tag 的说明;轻量 tag 没有说明。去掉签名块与首尾空行。
 highlights=""
@@ -27,10 +29,10 @@ fi
 
 # 3. CHANGELOG 新增的行。
 if [ -n "$prev" ]; then
-  changes="$(git diff --unified=0 "$prev" "$tag" -- CHANGELOG.md \
+  changes="$(git diff --unified=0 "$prev" "$tag" -- "$changelog" \
     | grep '^+' | grep -v '^+++' | sed 's/^+//' || true)"
 else
-  changes="$(git show "$tag:CHANGELOG.md" | sed '1{/^# /d;}')"
+  changes="$(git show "$tag:$changelog" | sed '1{/^# /d;}')"
 fi
 # 去掉开头的空行;日期标题降一级,挂在「详细变更」之下。
 changes="$(printf '%s\n' "$changes" | sed '/./,$!d' | sed 's/^## /### /')"
@@ -57,7 +59,7 @@ EOF
 
 if [ -n "$changes" ]; then
   if [ -n "$prev" ]; then
-    title="详细变更（自 $prev 起，摘自 CHANGELOG）"
+    title="详细变更（自 ${prev#desktop/} 起，摘自 CHANGELOG）"
   else
     title="详细变更（摘自 CHANGELOG）"
   fi

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pangxincheng/tunnel/tunnel"
+	"github.com/pangxincheng/tunnel/cli/tunnel"
 )
 
 func TestLoadMissing(t *testing.T) {
