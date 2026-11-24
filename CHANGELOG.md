@@ -1,6 +1,11 @@
 # CHANGELOG
 
 ## 2026-11-23
+- 新增桌面端发布工作流 `.github/workflows/release-desktop.yml`:推送 `v[0-9]+.[0-9]+.[0-9]+*` 形式的 tag 触发;先检查 `desktop/go.mod` 没有 replace 到本地 tunnel,跑前端测试 / tsc / 构建与 Go 测试(ubuntu-24.04,GTK4 + WebKitGTK 6.0);再并行打包 macOS arm64 / amd64 `.dmg`(macos-latest,amd64 交叉编译)、Windows amd64 NSIS 安装程序(ubuntu 交叉编译 + apt `nsis`)、Linux amd64 `.deb` / `.rpm`,统一命名 `tunnel-app_<tag>_<系统>_<架构>`;最后汇总产物、生成 `SHA256SUMS` 与版本说明,用 `gh release create --generate-notes` 创建 Release,带 `-` 的 tag 发布为预发布。
+- 新增 `.github/scripts/release-notes.sh`:版本说明 = 附注 tag 的说明(亮点)+ 下载与安装对照表 + 本 tag 相对上一个 `v*` tag 在 CHANGELOG 新增的行(写了亮点时折叠),GitHub 再追加 PR 列表与对比链接。
+- 构建时注入 App 版本:根 Taskfile 新增 `VERSION`(默认 `dev`),三个平台正式构建的 ldflags 加 `-X main.version={{.VERSION}}`(此前「关于 Tunnel」始终显示 dev)。新增 `desktop/build/set_version.py`,把版本写进 Info.plist、Windows `info.json`(固定版本只取数字部分)、NSIS `INFO_PRODUCTVERSION`、nfpm 与 `build/config.yml`,只改版本字段。
+- nfpm 元数据去掉模板默认值:维护者、描述、厂商、主页改为本项目;删除未经确认的 `license: "MIT"`(仓库尚无 LICENSE)。
+- `desktop/README.md` 新增「发布」一节(工作流、版本号、版本说明的写法与本地预览),已知缺口补 macOS 未公证、Windows / Linux 仅 amd64。
 - 真机试用后的修正(macOS,隔离配置,未安装任何服务):
   - 中文文案改用全角标点:`zh.ts` 里紧挨汉字的半角 `,` `:` `?` 与半角括号改为「，」「：」「？」「（）」(如「连到它上面，就能」「删除 {name}？」「已开启（端口 {port}）」),新增测试 `Chinese copy uses full-width punctuation` 防止回退;spec §7.2 删除确认文案同步。设备行「连接命令」按钮的无障碍名称改用 `cmdsTitle`(「nas 的连接命令」),不再在代码里拼半角冒号。
   - 测试连接失败时只显示一整句:`dial` 为「连不上 {host}:{port}，请检查地址、端口和网络」,`socketdir` 为「已登录，但无法在服务器上创建 socket 目录」;原始错误(多为英文,如 `ssh connection failed: dial tcp …`)收进默认折叠的「详情」(`errDetails`)。英文文案同步。

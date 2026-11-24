@@ -53,10 +53,34 @@ go test ./...
 
 `go.mod` 里 `github.com/pangxincheng/tunnel` 暂时 `replace` 到 `../../tunnel`(同级检出,需在 `feat/app-cli` 分支)。tunnel v1.3.0 打 tag 后,去掉 `replace`,改为 `require github.com/pangxincheng/tunnel v1.3.0` 并运行 `go mod tidy` 与完整测试。
 
+## 发布
+
+推送形如 `v1.2.3`(可带 `-beta.1` 等后缀,带后缀的发布为预发布版本)的 tag,`.github/workflows/release-desktop.yml` 即自动测试、构建并创建 GitHub Release:
+
+| 安装包 | 构建方式 |
+|---|---|
+| macOS arm64 / amd64 `.dmg` | macos-latest,amd64 为交叉编译;仅 ad-hoc 签名,未公证 |
+| Windows amd64 NSIS 安装程序 | ubuntu 上交叉编译(无 CGO)+ apt 的 `makensis` |
+| Linux amd64 `.deb` / `.rpm` | ubuntu-24.04(GTK4 + WebKitGTK 6.0) |
+
+另附 `SHA256SUMS`。版本号取自 tag:构建时以 `VERSION=<去掉 v 的 tag>` 注入 `main.version`(「关于 Tunnel」显示;本地构建为 `dev`),并由 `build/set_version.py` 写进 Info.plist、Windows 版本信息、NSIS 与 nfpm。不要用 `wails3 task common:update:build-assets` 改版本:它按模板重新生成这些文件,会丢掉随包附带 tunnel 等定制。
+
+**发布前**:`go.mod` 不能再 `replace` 到本地 tunnel(工作流第一步会检查并失败),需 `require` 已打 tag 的 tunnel 版本。
+
+**版本说明**由 `.github/scripts/release-notes.sh` 生成,依次为:
+
+1. 亮点:附注 tag 的说明。发布时把面向用户的要点写进 tag:`git tag -a v1.2.3 -F notes.md`(不写说明的轻量 tag 则省略这一段)。
+2. 下载与安装:固定的下载对照表与 macOS 首次打开的说明。
+3. 详细变更:本 tag 相对上一个 `v*` tag 在 `CHANGELOG.md` 中新增的行(第一次发布取整份);写了亮点时折叠在「详细变更」里。
+4. GitHub 自动生成的 PR 列表与「Full Changelog」对比链接(`gh release create --generate-notes`)。
+
+本地预览:`.github/scripts/release-notes.sh v1.2.3`(需先在本地打好该 tag)。
+
 ## 已知缺口
 
 - Linux AppImage 不带 tunnel 命令行(deb / rpm 带),AppImage 用户暂时无法使用共享。[pending]
-- macOS 只构建当前架构,没有 universal 包;`bundle:tunnel` 同样只编当前架构。
+- macOS 没有 universal 包:本地构建只编当前架构,发布工作流分别打 arm64 与 amd64 两个 `.dmg`;两者都未经 Apple 公证,首次打开需右键「打开」。
+- 发布工作流只出 amd64 的 Windows / Linux 包,没有 ARM64;Linux 不出 AppImage(见上一条)。
 - 图形界面(窗口、托盘、菜单、标题栏)在开发机上无法观察,尚未在真机验证:请按下面的清单逐项检查。
 - Windows / Linux 的打包产物未在 macOS 上验证。
 
