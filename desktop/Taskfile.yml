@@ -40,6 +40,28 @@ tasks:
       GOOS: '{{.TARGET_OS}}'
       GOARCH: '{{.ARCH | default ARCH}}'
 
+  tunnel:bump:
+    summary: Pins tunnel (Go library and bundled CLI) to a released version, then runs all Go tests
+    desc: |
+      Usage: wails3 task tunnel:bump V=v1.3.1
+      go.mod is the single source of the tunnel version: the app compiles
+      against that library and bundle:tunnel builds the CLI from it. This drops
+      any local replace (../../tunnel), requires tunnel@V, tidies and tests.
+    requires:
+      vars: [V]
+    preconditions:
+      - sh: '{{if regexMatch "^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$" (.V | default "")}}true{{else}}false{{end}}'
+        msg: "V must be a tunnel release tag such as v1.3.1, got '{{.V}}'"
+    cmds:
+      - go mod edit -dropreplace=github.com/pangxincheng/tunnel
+      - go get github.com/pangxincheng/tunnel@{{.V}}
+      - go mod tidy
+      - task: common:build:frontend # go:embed needs frontend/dist
+      - go test ./...
+      # tunnelversion_test.go fails the line above when V is older than the
+      # app's minimum (v1.3.0): older CLIs lack status --json / set-name.
+      - echo "tunnel pinned to {{.V}}. Record it in CHANGELOG.md and commit go.mod / go.sum."
+
   build:
     summary: Builds the application
     deps:

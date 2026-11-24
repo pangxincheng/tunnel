@@ -1,6 +1,7 @@
 # CHANGELOG
 
 ## 2026-11-23
+- 新增 `wails3 task tunnel:bump V=vX.Y.Z`:去掉本地 replace、`go get github.com/pangxincheng/tunnel@V`、`go mod tidy`、构建前端并跑 `go test ./...`,`go.mod` 仍是 tunnel 版本(Go 库与附带 CLI)的唯一来源;缺少或格式错误的 `V` 给出明确提示。新增 `tunnelversion_test.go`:`go.mod` 要求的 tunnel 低于 `minTunnel`(v1.3.0,附带 CLI 需支持 `status --json` / `set-name`)时测试失败,使用 replace 时跳过(此前固定到 v1.2.0 时所有测试仍通过)。README 的「go.mod 的 replace」改为「tunnel 的版本」。
 - 新增桌面端发布工作流 `.github/workflows/release-desktop.yml`:推送 `v[0-9]+.[0-9]+.[0-9]+*` 形式的 tag 触发;先检查 `desktop/go.mod` 没有 replace 到本地 tunnel,跑前端测试 / tsc / 构建与 Go 测试(ubuntu-24.04,GTK4 + WebKitGTK 6.0);再并行打包 macOS arm64 / amd64 `.dmg`(macos-latest,amd64 交叉编译)、Windows amd64 NSIS 安装程序(ubuntu 交叉编译 + apt `nsis`)、Linux amd64 `.deb` / `.rpm`,统一命名 `tunnel-app_<tag>_<系统>_<架构>`;最后汇总产物、生成 `SHA256SUMS` 与版本说明,用 `gh release create --generate-notes` 创建 Release,带 `-` 的 tag 发布为预发布。
 - 新增 `.github/scripts/release-notes.sh`:版本说明 = 附注 tag 的说明(亮点)+ 下载与安装对照表 + 本 tag 相对上一个 `v*` tag 在 CHANGELOG 新增的行(写了亮点时折叠),GitHub 再追加 PR 列表与对比链接。
 - 构建时注入 App 版本:根 Taskfile 新增 `VERSION`(默认 `dev`),三个平台正式构建的 ldflags 加 `-X main.version={{.VERSION}}`(此前「关于 Tunnel」始终显示 dev)。新增 `desktop/build/set_version.py`,把版本写进 Info.plist、Windows `info.json`(固定版本只取数字部分)、NSIS `INFO_PRODUCTVERSION`、nfpm 与 `build/config.yml`,只改版本字段。

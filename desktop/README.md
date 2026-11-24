@@ -49,9 +49,17 @@ go test ./...
 | `TUNNEL_APP_TUNNEL_BIN` | 指定要使用的 tunnel 可执行文件(默认用 App 旁边附带的那个;Linux deb / rpm 装在 `/usr/lib/tunnel-app/tunnel`,不进 PATH) |
 | `TUNNEL_APP_CONFIG` | 指定配置文件路径,用于隔离的试运行(默认在用户配置目录的 `tunnel-app/` 下) |
 
-## go.mod 的 replace
+## tunnel 的版本
 
-`go.mod` 里 `github.com/pangxincheng/tunnel` 暂时 `replace` 到 `../../tunnel`(同级检出,需在 `feat/app-cli` 分支)。tunnel v1.3.0 打 tag 后,去掉 `replace`,改为 `require github.com/pangxincheng/tunnel v1.3.0` 并运行 `go mod tidy` 与完整测试。
+`go.mod` 是 tunnel 版本的唯一来源:App 编译时使用该版本的 Go 库,`bundle:tunnel` 也用同一版本编出随包附带的 CLI。升级(或固定)到某个已发布的 tunnel 版本:
+
+```bash
+wails3 task tunnel:bump V=v1.3.1   # 去掉本地 replace → go get tunnel@V → go mod tidy → 构建前端 → go test ./...
+```
+
+然后在 `CHANGELOG.md` 记一笔并提交 `go.mod` / `go.sum`。App 至少需要 tunnel v1.3.0(附带的 CLI 要支持 `status --json` 与 `set-name`),`tunnelversion_test.go` 会让低于该版本的 `go.mod` 测试失败;最低版本变化时改其中的 `minTunnel`。
+
+与 tunnel 同时开发时,可临时 `go mod edit -replace github.com/pangxincheng/tunnel=../../tunnel` 指向同级检出(此时版本检查跳过),但不要提交:发布工作流会拒绝带 replace 的 `go.mod`。
 
 ## 发布
 
