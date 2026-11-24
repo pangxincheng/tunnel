@@ -395,12 +395,29 @@ func (m *Manager) SetShareSystem(server string, system bool) error {
 	return m.updateShareIntent(server, func(si *config.ShareIntent) { si.System = system })
 }
 
-// RetryShare makes the share service reconnect now.
+// RetryShare makes the share service reconnect now; a service that is
+// installed but not running is installed again instead.
 func (m *Manager) RetryShare(server string) error {
 	if _, err := m.serverCopy(server); err != nil {
 		return err
 	}
 	defer m.syncShare(server)
+	st, err := m.shareStatus(server)
+	if err == nil && st.Installed && !st.Running {
+		// Installed but not running (e.g. a failed update unloaded it): a retry
+		// sent to the service cannot work, so install it again in its mode,
+		// which loads and starts it (system mode asks for authorization).
+		s, err := m.lockOp(server)
+		if err != nil {
+			return err
+		}
+		defer s.op.Unlock()
+		sc, err := m.serverCopy(server)
+		if err != nil {
+			return err
+		}
+		return m.installShare(s, &sc, installedSystem(st, sc.Share.System))
+	}
 	return m.d.Share.Retry(m.opCtx(), server)
 }
 

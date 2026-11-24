@@ -898,8 +898,29 @@ func TestRetryShareNotRunning(t *testing.T) {
 		e.share.installed("home", false, "mac")
 		e.share.setSvc("home", func(s *fakeSvc) { s.stopped = true })
 	})
-	if err := e.m.RetryShare("home"); !errors.Is(err, sharesvc.ErrNotRunning) {
-		t.Fatalf("got %v", err)
+	// Installed but not running (e.g. unloaded by a failed update): retry
+	// reinstalls it in its installed mode, which loads and starts it again.
+	if err := e.m.RetryShare("home"); err != nil {
+		t.Fatal(err)
+	}
+	if !contains(e.share.Calls(), "install home name=mac system=false local=22") {
+		t.Fatalf("calls %v", e.share.Calls())
+	}
+	if contains(e.share.Calls(), "retry home") {
+		t.Fatal("retry sent to a service that is not running")
+	}
+}
+
+func TestRetryShareNotRunningSystemMode(t *testing.T) {
+	e := newEnv(t, cfgWith(withShare(srvCfg("home"), true, "mac")), func(e *env) {
+		e.share.installed("home", true, "mac")
+		e.share.setSvc("home", func(s *fakeSvc) { s.stopped = true })
+	})
+	if err := e.m.RetryShare("home"); err != nil {
+		t.Fatal(err)
+	}
+	if !contains(e.share.Calls(), "install home name=mac system=true local=22") {
+		t.Fatalf("calls %v", e.share.Calls())
 	}
 }
 

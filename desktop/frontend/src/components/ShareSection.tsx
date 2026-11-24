@@ -160,7 +160,7 @@ export default function ShareSection({ server, platform, sshd, settings, disable
             </div>
             <div className={failed ? 'meta err' : 'meta'}>
               {meta}
-              {share.on && share.system && !share.busy && (
+              {share.on && share.system && !share.busy && !failed && (
                 <>
                   <span className="gap" />
                   {t('keepOn')}

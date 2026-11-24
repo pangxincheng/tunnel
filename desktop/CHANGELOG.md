@@ -1,6 +1,7 @@
 # CHANGELOG
 
 ## 2026-11-24
+- 共享服务「已安装但未运行」时(例如 macOS 上更新服务失败,旧服务被卸载而新服务没装回去),「重试」改为按已安装的模式重新安装服务(系统模式会请求管理员授权),把它重新加载并启动;此前「重试」只给运行中的服务发消息,必然失败,关掉再打开共享也只会「恢复」,App 内没有办法让服务重新跑起来。共享失败 / 未运行时不再在状态后面显示「无人登录也在线」(它只表示系统模式,与「共享服务未运行」并列容易被误读为仍在线)。新增 `TestRetryShareNotRunningSystemMode`,`TestRetryShareNotRunning` 改为断言重新安装。
 - 共享日志改在 App 内查看:「查看日志」打开只读的日志窗口(xterm.js,`@xterm/xterm` 6 + fit / search 插件,按需懒加载,主包不增大),先显示最近 1000 行,之后实时追加;可搜索(Enter / Shift+Enter 上下查找)、调字号(10–20,记在设置 `log_font_size` 里)、清屏、复制全部;颜色跟随 App 的浅色 / 深色模式与主题色,Esc 关闭。共享开着时共享行上就有「查看日志」,不再只在出错时出现。后端新增 `internal/logtail`(`Follow` 像 `tail -n N -f` 一样跟随文件,处理截断 / 轮转;`FollowCmd` 跟随命令输出)与 `AppService.StartLog` / `StopLog`,以 `share-log` 事件推送;macOS / Windows 读服务日志文件,Linux 跟随 `journalctl [--user] -u tunnel-<profile> -f`(此前 Linux 只给出一条命令让用户自己去终端运行)。
 - 设备详情:点设备名展开,显示主机名、系统(版本 · 架构)、tunnel 版本、本次上线 / 最后在线时间与设备 ID;缺失的显示「未知」。这些信息此前已从服务器取到,但界面只显示了系统与在线时长。
 - 删除离线设备:离线设备的详情里有「删除这台设备」(确认后),删掉服务器上它的记录并清除本机为它保存的端口、最后在线时间;在线或刚上线的设备拒绝删除(代码 `online`),服务器未连接时按钮禁用(代码 `not_connected`)。核心新增 `Manager.RemoveDevice`。

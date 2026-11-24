@@ -101,6 +101,15 @@ describe('ShareSection', () => {
     expect(apiMock.StopLog).toHaveBeenCalledWith(1)
   })
 
+  it('the unattended label is shown only while the service is healthy', () => {
+    const { unmount } = share({ on: true, phase: 'ready', system: true }, 'darwin')
+    expect(screen.getByText(/无人登录也保持在线|无人登录也在线/)).toBeTruthy()
+    unmount()
+    share({ on: true, phase: 'not_running', system: true }, 'darwin')
+    expect(screen.getByText('共享服务未运行')).toBeTruthy()
+    expect(screen.queryByText(/无人登录也/)).toBeNull()
+  })
+
   it('no view logs while not sharing', () => {
     share({ on: false })
     expect(screen.queryByText('查看日志')).toBeNull()
