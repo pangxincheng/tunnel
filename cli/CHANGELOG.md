@@ -1,7 +1,7 @@
 # Changelog
 
 ## 2026-11-23
-
+- 仓库改为 monorepo:命令行代码(`cmd/`、`internal/`、`tunnel/`、`go.mod`、`tunnel.toml.example`、本 README 与 CHANGELOG)移入 `cli/`,Go 模块路径改为 `github.com/pangxincheng/tunnel/cli`(库包 `github.com/pangxincheng/tunnel/cli/tunnel`,版本注入 `-X github.com/pangxincheng/tunnel/cli/tunnel.Version=…`)。旧模块路径 `github.com/pangxincheng/tunnel` 停留在 v1.3.0。发布工作流改名 `release-cli.yml`,改由 `cli/v*` tag 触发,版本号去掉 `cli/` 前缀,产物仍为 `tunnel_<版本>_<os>_<arch>`;README 徽章、编译步骤、库的 import 路径与文档链接同步。
 - tunnel-app 一期设计文档已同步:§6.4 / §9 服务名改为 `tunnel-<profile>`,并补充 `--for-user`、`status --json` 的 `mode` 与退出码 3 / 4、`set-name`(原待办项已完成)。
 - `tunnel status --json` 运行中的输出在 `ShareStatus` 全部字段之外加 `"mode":"user"|"system"`;已安装但未运行时(退出码 3)`--json` 只输出 `{"installed":true,"running":false,"mode":"<mode>"}`;新增退出码 4 = 未安装(`--json` 输出 `{"installed":false}`),原先未安装为退出码 1(供 tunnel-app 判断安装 / 运行状态)。
 - 新增 `tunnel set-name NAME [--mode=MODE] [--profile=P]`:经控制通道发 `set-name` 不重装改设备名字,成功 0;名字不合法或被占用(`NameTakenError` 的信息输出到 stderr)退出码 1。

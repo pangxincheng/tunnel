@@ -1,4 +1,4 @@
-// tunnel CLI:库包 github.com/pangxincheng/tunnel/tunnel 的薄壳(docopt 实现,与 pTunnel 同款)。
+// tunnel CLI:库包 github.com/pangxincheng/tunnel/cli/tunnel 的薄壳(docopt 实现,与 pTunnel 同款)。
 //
 // 子命令:
 //
@@ -31,8 +31,8 @@ import (
 
 	"github.com/docopt/docopt-go"
 
-	"github.com/pangxincheng/tunnel/internal/svc"
-	"github.com/pangxincheng/tunnel/tunnel"
+	"github.com/pangxincheng/tunnel/cli/internal/svc"
+	"github.com/pangxincheng/tunnel/cli/tunnel"
 )
 
 const (

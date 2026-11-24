@@ -22,8 +22,8 @@ import (
 	"github.com/BurntSushi/toml"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/pangxincheng/tunnel/internal/svc"
-	"github.com/pangxincheng/tunnel/tunnel"
+	"github.com/pangxincheng/tunnel/cli/internal/svc"
+	"github.com/pangxincheng/tunnel/cli/tunnel"
 )
 
 const (

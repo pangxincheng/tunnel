@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/pangxincheng/tunnel/internal/svc"
+	"github.com/pangxincheng/tunnel/cli/internal/svc"
 )
 
 // checkPrivilege 在 Windows 上不检查:system 模式已由 svc.NewManager 拒绝,

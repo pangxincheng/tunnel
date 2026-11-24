@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pangxincheng/tunnel/tunnel"
+	"github.com/pangxincheng/tunnel/cli/tunnel"
 )
 
 // nilArgs 模拟 docopt 在选项未出现在命令行时的 map:值为 nil。

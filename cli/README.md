@@ -1,13 +1,13 @@
 <p align="center">
-  <img src="assets/icon.svg" width="96" alt="tunnel logo">
+  <img src="../assets/icon.svg" width="96" alt="tunnel logo">
 </p>
 
-<h1 align="center">tunnel</h1>
+<h1 align="center">tunnel 命令行</h1>
 
 <p align="center">
-  <a href="https://github.com/pangxincheng/tunnel/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/pangxincheng/tunnel/release.yml?style=flat-square" alt="release"></a>
-  <a href="https://github.com/pangxincheng/tunnel/releases"><img src="https://img.shields.io/github/v/release/pangxincheng/tunnel?style=flat-square" alt="release version"></a>
-  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/pangxincheng/tunnel?style=flat-square" alt="go version"></a>
+  <a href="https://github.com/pangxincheng/tunnel/actions/workflows/release-cli.yml"><img src="https://img.shields.io/github/actions/workflow/status/pangxincheng/tunnel/release-cli.yml?style=flat-square" alt="release"></a>
+  <a href="https://github.com/pangxincheng/tunnel/releases"><img src="https://img.shields.io/github/v/release/pangxincheng/tunnel?filter=!desktop%2F*&style=flat-square" alt="release version"></a>
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/pangxincheng/tunnel?filename=cli%2Fgo.mod&style=flat-square" alt="go version"></a>
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License">
 
 </p>
@@ -35,7 +35,7 @@
 - **按名字转发**:`--name nas` 以 VPS 上的 Unix socket 作汇合点,不用记端口,断线重连不撞车
 - **断线自愈**:应用层 keepalive 探活,指数退避自动重连
 - **主机公钥钉住**:不使用 TOFU,配置里钉死 VPS 公钥,不匹配即拒绝
-- **纯 Go 库**:核心在 `tunnel/` 包,移动端可经 gomobile 直接调用(无系统 ssh 依赖)
+- **纯 Go 库**:核心在 `cli/tunnel/` 包(`github.com/pangxincheng/tunnel/cli/tunnel`),移动端可经 gomobile 直接调用(无系统 ssh 依赖)
 - **TOML 配置 + flag 覆盖**:长期驻留用配置文件,临时调整用 flag
 
 ## 编译
@@ -43,14 +43,14 @@
 需要 Go ≥ 1.22:
 
 ```bash
-git clone https://github.com/pangxincheng/tunnel.git && cd tunnel
+git clone https://github.com/pangxincheng/tunnel.git && cd tunnel/cli
 mkdir -p dist && go build -o dist/tunnel ./cmd/tunnel
 
 # 运行测试(不依赖真实 VPS,内置进程内测试 SSH 服务器)
 go test ./...
 ```
 
-注意:二进制不能输出到仓库根目录的 `./tunnel` —— 该位置是库源码目录 `tunnel/`。
+注意:二进制不能输出到 `cli/` 下的 `./tunnel` —— 该位置是库源码目录 `cli/tunnel/`。
 
 ## 使用
 
@@ -258,7 +258,7 @@ sudo tunnel uninstall --mode system --profile default   # user 模式不加 sudo
 ## 作为库使用(移动端)
 
 ```go
-import "github.com/pangxincheng/tunnel/tunnel"
+import "github.com/pangxincheng/tunnel/cli/tunnel"
 
 cfg := &tunnel.Config{
     SSHAddr: "vps.example.com:22",
@@ -289,10 +289,10 @@ c.Run(ctx) // 守护:keepalive + 退避重连
 
 ## 文档
 
-- 设计文档:`docs/superpowers/specs/2026-08-14-tunnel-design.md`、`docs/superpowers/specs/2026-11-22-name-forwarding-design.md`(按名字转发)
-- 实施计划:`docs/superpowers/plans/2026-08-14-tunnel-orchestrator.md`、`docs/superpowers/plans/2026-11-22-name-forwarding.md`
-- 变更记录:`CHANGELOG.md`
+- 设计文档:`../docs/superpowers/specs/2026-08-14-tunnel-design.md`、`../docs/superpowers/specs/2026-11-22-name-forwarding-design.md`(按名字转发)
+- 实施计划:`../docs/superpowers/plans/2026-08-14-tunnel-orchestrator.md`、`../docs/superpowers/plans/2026-11-22-name-forwarding.md`
+- 变更记录:`CHANGELOG.md`(命令行);桌面端见 `../desktop/`
 
 ## License
 
-MIT(见 LICENSE)
+MIT(见仓库根目录的 `LICENSE`)

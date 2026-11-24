@@ -1,4 +1,4 @@
-module github.com/pangxincheng/tunnel
+module github.com/pangxincheng/tunnel/cli
 
 go 1.25.5
 

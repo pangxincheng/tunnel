@@ -27,8 +27,8 @@ import (
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/pangxincheng/tunnel/internal/svc"
-	"github.com/pangxincheng/tunnel/tunnel"
+	"github.com/pangxincheng/tunnel/cli/internal/svc"
+	"github.com/pangxincheng/tunnel/cli/tunnel"
 )
 
 // ---------- 进程内测试 SSH 服务器(公钥认证、keepalive、sftp、streamlocal 转发) ----------

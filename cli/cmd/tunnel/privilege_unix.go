@@ -10,7 +10,7 @@ import (
 	"os/exec"
 	"syscall"
 
-	"github.com/pangxincheng/tunnel/internal/svc"
+	"github.com/pangxincheng/tunnel/cli/internal/svc"
 )
 
 // checkPrivilege 在任何副作用之前检查运行身份:

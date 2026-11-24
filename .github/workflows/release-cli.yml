@@ -1,15 +1,19 @@
-# 发布工作流:打 tag(如 v0.2.0)即触发。
+# 命令行发布工作流:推送形如 cli/v1.4.0 的 tag 即触发(桌面端用 desktop/v*,见 release-desktop.yml)。
 # 流程:跑测试 → 6 平台交叉编译(CGO_ENABLED=0,版本经 ldflags 注入)
-# → 打包 → 汇总到 GitHub Release。
-name: release
+# → 打包 → 汇总到 GitHub Release。命令行代码在 cli/(Go 模块 github.com/pangxincheng/tunnel/cli)。
+name: release-cli
 
 on:
   push:
     tags:
-      - "v*"
+      - "cli/v*"
 
 permissions:
   contents: write
+
+defaults:
+  run:
+    working-directory: cli
 
 jobs:
   test:
@@ -18,7 +22,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
       - run: go test ./... -count=1
 
   build:
@@ -33,7 +38,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
 
       - name: 编译(版本注入 + 静态编译)
         env:
@@ -41,23 +47,25 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
         run: |
-          VERSION=${GITHUB_REF_NAME}
+          VERSION=${GITHUB_REF_NAME#cli/}
           BIN=tunnel
           if [ "$GOOS" = "windows" ]; then BIN=tunnel.exe; fi
           mkdir -p dist
-          go build -trimpath -ldflags "-s -w -X github.com/pangxincheng/tunnel/tunnel.Version=$VERSION" \
+          go build -trimpath -ldflags "-s -w -X github.com/pangxincheng/tunnel/cli/tunnel.Version=$VERSION" \
             -o "dist/$BIN" ./cmd/tunnel
 
       - name: 打包(含配置样例与许可证)
         run: |
-          cp tunnel.toml.example LICENSE dist/
+          VERSION=${GITHUB_REF_NAME#cli/}
+          cp tunnel.toml.example ../LICENSE dist/
           cd dist
-          NAME=tunnel_${GITHUB_REF_NAME}_${GOOS}_${GOARCH}
+          NAME=tunnel_${VERSION}_${GOOS}_${GOARCH}
           if [ "$GOOS" = "windows" ]; then
             zip "${NAME}.zip" tunnel.exe tunnel.toml.example LICENSE
           else
             tar czf "${NAME}.tar.gz" tunnel tunnel.toml.example LICENSE
           fi
+          echo "ASSET_GLOB=cli/dist/${NAME}.*" >> "$GITHUB_ENV"
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
@@ -65,4 +73,5 @@ jobs:
       - name: 上传到 Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/tunnel_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}.*
+          name: tunnel 命令行 ${{ github.ref_name }}
+          files: ${{ env.ASSET_GLOB }}
