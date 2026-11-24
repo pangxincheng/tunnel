@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import { useAppState } from './state'
 import { resolveLang, setLang } from './i18n'
 import Sidebar from './components/Sidebar'
@@ -42,7 +42,9 @@ export default function App() {
   const dark = mode === 'dark' || (mode === 'system' && systemDark)
   const loaded = !!state
   // Mirror the theme on <html> so the body background and overscroll follow it.
-  useEffect(() => {
+  // A layout effect applies it in the same commit as the content: no frame of
+  // the light theme, and nothing can observe the content without the theme.
+  useLayoutEffect(() => {
     if (!loaded) return
     const el = document.documentElement
     el.classList.toggle('dark', dark)

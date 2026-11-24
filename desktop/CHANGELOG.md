@@ -1,5 +1,8 @@
 # CHANGELOG
 
+## 2026-11-24
+- 主题(深色类名与主题色)改在 `useLayoutEffect` 中写到 `<html>`,与内容在同一次提交生效:启动时不再先闪一帧浅色;也修复了 CI 中偶发失败的 `puts the theme on the document element too`(内容出现时 `useEffect` 可能尚未执行,本地无法复现,按时序分析修复)。
+
 ## 2026-11-23
 - 附带 CLI 的版本号:自最近的 `cli/v*` tag 以来 `cli/` 未改动时直接用该 tag(tag 打在只改桌面端的提交上也能识别),否则仍取最近一次改动 `cli/` 的提交的 `git describe`。
 - 并入 tunnel monorepo 的 `desktop/`:Go 模块改名 `github.com/pangxincheng/tunnel/desktop`,依赖改为 `github.com/pangxincheng/tunnel/cli` + `replace … => ../cli`(同一提交,不再需要同步 tunnel 版本),import 同步改为 `…/cli/tunnel`,`tool` 指令改为 `…/cli/cmd/tunnel`;重新生成 bindings(路径 `bindings/github.com/pangxincheng/tunnel/desktop/…`,内容不变),`api.ts` 引用同步。删除 `tunnel:bump` 任务与 `tunnelversion_test.go`(不再有版本可选)。`bundle:tunnel` 从 `../cli` 编译附带 CLI,版本号改为 `git describe` 最近一次改动 `cli/` 的提交(相对 `cli/v*` 或旧 `v*` tag),只改桌面端时不变,避免无故提示「更新共享服务」。发布工作流改由 `desktop/v*` tag 触发:测试同时跑 `cli/` 的测试,构建任务取完整历史,产物名与版本号去掉 `desktop/` 前缀,Release 标题「Tunnel 桌面端 vX.Y.Z」,去掉「go.mod 不得 replace」检查。nfpm 主页改为 tunnel 仓库;README 的「tunnel 的版本」改为「与 cli/ 的关系」,「发布」改为 `desktop/v*` 与 `desktop-release-notes.sh`。App 的标识(`com.pangxincheng.tunnel-app`、可执行文件 `tunnel-app`、配置目录 `tunnel-app/`)不变,已有配置照常使用。
