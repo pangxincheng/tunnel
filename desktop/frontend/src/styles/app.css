@@ -98,6 +98,8 @@ button, input, select { font: inherit; color: inherit; }
 .swatch.sel { box-shadow: 0 0 0 2px var(--canvas), 0 0 0 4px var(--live); }
 
 /* ---------- dialogs ---------- */
+/* macOS: the traffic lights sit over the top 46px (hidden-inset title bar); keep dialogs below them. */
+.app[data-platform="darwin"] .scrim { padding-top: 46px; }
 .scrim { position: absolute; inset: 0; background: var(--scrim); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 20; animation: fade .15s ease-out; }
 .dlg { width: min(460px, 100%); max-height: 100%; background: var(--canvas); border-radius: 12px; box-shadow: 0 18px 40px var(--shadow), 0 0 0 .5px var(--shadow); display: flex; flex-direction: column; overflow: hidden; animation: pop .16s ease-out; }
 .dlg.wide { width: min(560px, 100%); }
