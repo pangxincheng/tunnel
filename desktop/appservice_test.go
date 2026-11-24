@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,6 +32,8 @@ func TestProbeErrorCodes(t *testing.T) {
 		{&probe.DialError{Err: errors.New("x")}, "dial"},
 		{&probe.SocketDirError{Err: errors.New("x")}, "socketdir"},
 		{core.ErrDeviceOffline, "offline"},
+		{core.ErrPortBusy, "port_busy"},
+		{core.ErrForwardOn, "forward_on"},
 		{core.ErrNoSSHD, "no_sshd"},
 		{core.ErrNameTaken, "name_taken"},
 		{sharesvc.ErrCancelled, "cancelled"},
@@ -219,8 +223,25 @@ func TestQuitCallsHookAndTemplateIconIsPNG(t *testing.T) {
 	if !called {
 		t.Error("quit hook not called")
 	}
-	if b := templateIcon(); len(b) < 8 || string(b[1:4]) != "PNG" {
-		t.Error("template icon is not a PNG")
+}
+
+func TestTrayIcons(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		data []byte
+		size int
+	}{
+		{"macOS template (22pt @2x)", trayTemplateIcon, 44},
+		{"Windows / Linux", trayColorIcon, 64},
+	} {
+		cfg, err := png.DecodeConfig(bytes.NewReader(c.data))
+		if err != nil {
+			t.Errorf("%s: not a PNG: %v", c.name, err)
+			continue
+		}
+		if cfg.Width != c.size || cfg.Height != c.size {
+			t.Errorf("%s: %dx%d, want %dx%d", c.name, cfg.Width, cfg.Height, c.size, c.size)
+		}
 	}
 }
 

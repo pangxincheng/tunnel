@@ -7,6 +7,7 @@ import { setLang } from '../i18n'
 import DeviceRow from '../components/DeviceRow'
 import ServerDetail from '../components/ServerDetail'
 
+import { expectPlainText } from './plainText'
 vi.mock('../api', async () => (await import('./apiMock')).apiMock)
 
 const noop = () => {}
@@ -45,6 +46,13 @@ describe('DeviceRow', () => {
     row({ online: false, on: true })
     expect(screen.getByText('离线，上线后恢复')).toBeTruthy()
     expect((screen.getByRole('switch') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('the port editor is a plain text input', async () => {
+    const u = userEvent.setup()
+    row()
+    await u.click(screen.getByRole('button', { name: /5102/ }))
+    expectPlainText(screen.getByRole('textbox'))
   })
 
   it('port number turns into an input; Enter calls SetPort, Esc does not', async () => {
@@ -100,6 +108,39 @@ describe('DeviceRow', () => {
     const dev = device({ name: 'nas', on: true })
     const waiting = render(<DeviceRow server={server({ conn: 'waiting', devices: [dev] })} device={dev} onCommands={noop} />)
     expect(waiting.container.querySelector('.port.live')).toBeNull()
+  })
+
+  it('a forward that is on locks its port', async () => {
+    const u = userEvent.setup()
+    row({ on: true })
+    const chip = screen.getByRole('button', { name: /5102/ }) as HTMLButtonElement
+    expect(chip.disabled).toBe(true)
+    expect(chip.title).toBe('关闭转发后才能修改端口')
+    await u.click(chip)
+    expect(screen.queryByRole('textbox')).toBeNull()
+  })
+
+  it('says which port is taken when another program uses it', async () => {
+    const u = userEvent.setup()
+    apiMock.SetPort.mockRejectedValueOnce(new Error('port_busy: the local port is in use by another program'))
+    row()
+    await u.click(screen.getByRole('button', { name: /5102/ }))
+    const input = screen.getByRole('textbox')
+    await u.clear(input)
+    await u.type(input, '6001{Enter}')
+    expect(await screen.findByText('端口 6001 已被其他程序占用')).toBeTruthy()
+    expect(screen.getByRole('textbox')).toBeTruthy() // stays in edit mode to pick another
+  })
+
+  it('maps a forward_on rejection to a sentence', async () => {
+    const u = userEvent.setup()
+    apiMock.SetPort.mockRejectedValueOnce(new Error('forward_on: turn the forward off before changing its port'))
+    row()
+    await u.click(screen.getByRole('button', { name: /5102/ }))
+    const input = screen.getByRole('textbox')
+    await u.clear(input)
+    await u.type(input, '6001{Enter}')
+    expect(await screen.findByText('关闭转发后才能修改端口')).toBeTruthy()
   })
 
   it('maps port_conflict rejections by code', async () => {

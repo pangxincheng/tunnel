@@ -303,6 +303,10 @@ func (m *Manager) SetPort(server, device string, port int) error {
 	if _, listed := m.findDeviceLocked(s, device); !listed && !has {
 		return ErrUnknownDevice
 	}
+	// The port is locked while the forward is on (the UI disables it too).
+	if f.On {
+		return ErrForwardOn
+	}
 	if err := m.cfg.CheckPort(server, device, port); err != nil {
 		if errors.Is(err, config.ErrPortConflict) {
 			s.fwdErr[device] = "port_conflict"
@@ -311,21 +315,16 @@ func (m *Manager) SetPort(server, device string, port int) error {
 		}
 		return err
 	}
+	// Refuse a port another program listens on now, rather than failing
+	// later when the switch is turned on. Not recorded as the device's error:
+	// it is about the port asked for, which the UI reports itself.
+	if port != f.Port && !m.d.PortFree(port) {
+		return ErrPortBusy
+	}
 	delete(s.fwdErr, device)
 	f.Port = port
-	var addErr error
-	if f.On && s.conn != nil {
-		s.conn.sess.RemoveForward(device)
-		if addErr = s.conn.sess.AddForward(device, port); addErr != nil {
-			s.fwdErr[device] = fwdErrCode(addErr)
-			f.On = false
-		}
-	}
 	sc.Forwards[device] = f
-	if err := m.saveLocked(); err != nil {
-		return err
-	}
-	return addErr
+	return m.saveLocked()
 }
 
 // checkHostKey refuses a server without a parsable trusted host key, so a

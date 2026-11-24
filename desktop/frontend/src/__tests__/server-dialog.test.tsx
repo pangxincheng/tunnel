@@ -6,6 +6,7 @@ import { appState, server } from './fixtures'
 import { setLang } from '../i18n'
 import App from '../App'
 
+import { expectPlainText } from './plainText'
 vi.mock('../api', async () => (await import('./apiMock')).apiMock)
 
 const FP = 'SHA256:k3Vt9Qe1x0Zb7HnUqP2sLw8RfYc4mD6aJ5oE1iT0gXs'
@@ -36,6 +37,14 @@ describe('Server dialog', () => {
   beforeEach(() => {
     resetApiMock()
     setLang('zh')
+  })
+
+  it('text inputs never auto-capitalise or autocorrect (user names, hosts, paths)', async () => {
+    const { user } = await open()
+    await user.click(screen.getByText('高级'))
+    for (const label of ['名称', '地址', 'SSH 端口', '登录用户', '私钥', 'socket 目录']) {
+      expectPlainText(screen.getByLabelText(label))
+    }
   })
 
   it('shows live name errors and disables Save', async () => {

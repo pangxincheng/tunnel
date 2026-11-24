@@ -131,6 +131,7 @@ button, input, select { font: inherit; color: inherit; }
 .port { font-family: var(--code); font-size: 15px; font-weight: 500; border: 1px solid transparent; background: none; color: var(--faint); border-radius: 6px; padding: 2px 6px; cursor: text; }
 .port.live { color: var(--live); }
 .port:hover:not(:disabled) { border-color: var(--line); background: var(--canvas); }
+.port:disabled { cursor: default; }
 .inp { height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--canvas); color: var(--ink); outline: none; font-size: 12.5px; transition: border-color .15s, box-shadow .15s, background .15s; }
 .inp:hover:not(:disabled) { border-color: var(--faint); }
 .inp:focus { border-color: var(--live); background: var(--surface); box-shadow: 0 0 0 3px var(--live-soft); }

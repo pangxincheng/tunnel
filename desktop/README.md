@@ -22,7 +22,8 @@ Wails v3.1.0(Go 后端 + React 18 / TypeScript / Vite 前端)。设计见 `../do
 wails3 task bundle:tunnel   # 把 tunnel 命令行编进 bin/,打包时随 App 一起发布
 wails3 dev                  # 开发模式(前端热更新)
 wails3 build                # 构建当前系统的可执行文件(输出在 bin/)
-wails3 package              # 打包安装包(macOS .app、Linux deb / rpm / AppImage、Windows 安装程序)
+wails3 package              # 打包安装包(macOS Tunnel.app、Linux deb / rpm / AppImage、Windows 安装程序)
+build/make-icons.sh         # 改了 build/icon-src/ 的 SVG 后重新生成全部图标(App 图标、托盘图标、Assets.car)
 ```
 
 首次构建前先运行一次 `wails3 task bundle:tunnel`;没有附带的 tunnel 时 App 仍能启动,但共享功能会报「未找到附带的 tunnel 程序」。
@@ -99,7 +100,9 @@ go test ./...
 
 ### 连接其他设备
 - [ ] 在线设备打开开关后,本机 `ssh -p <端口> <用户>@127.0.0.1` 能连上该设备;离线设备的开关不可用。
-- [ ] 点端口数字可改端口(回车保存、Esc 取消);端口被其他程序占用时打开失败并提示,开关保持关闭。
+- [ ] 转发关着时点端口数字可改端口(回车保存、Esc 取消);改到被其他程序占用的端口时提示「端口 X 已被其他程序占用」并停在编辑状态;转发开着时端口不可点,悬停提示「关闭转发后才能修改端口」。
+- [ ] App 图标为 tunnel logo(访达 / 程序坞 / 启动台显示名为 Tunnel;Windows 开始菜单为 Tunnel);macOS 菜单栏为单色「墙 + 穿墙箭头」并随浅色 / 深色菜单栏变色,Windows / Linux 托盘为彩色 logo。
+- [ ] 登录用户、地址等输入框不会自动把首字母变成大写(macOS 开启「自动将单词首字母大写」时也一样)。
 - [ ] 连接命令弹窗里的命令都能复制。
 - [ ] 通过转发复制一个大文件(`scp -P <端口> 大文件 <用户>@127.0.0.1:/tmp/`,几百 MB 以上),传输期间不断开。
 

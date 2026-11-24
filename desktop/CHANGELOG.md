@@ -1,6 +1,10 @@
 # CHANGELOG
 
 ## 2026-11-24
+- App 图标换成项目 logo(深色底板、墙、穿墙而过的绿色通道):`build/icon-src/appicon.svg`(按 macOS 图标网格留边)生成 `appicon.png` → `icons.icns` / `icon.ico`;macOS 26 的 Icon Composer 图标 `appicon.icon` 改为 logo 底色 + `tunnel_glyph.svg` 图层(SVG 固有尺寸 1024,否则图案只占画布八分之一),重新生成 `Assets.car`。托盘图标:macOS 菜单栏改为单色模板图「墙在通道处断开 + 穿墙箭头」(`tray-template.png`,44×44),Windows / Linux 托盘改为彩色 logo(`tray.png`),取代原先代码绘制的圆环与 Wails 默认图标。新增 `build/make-icons.sh` 一键从 SVG 重新生成全部图标;`TestTrayIcons` 校验两枚内嵌 PNG 的尺寸。
+- 对用户显示的名字改为 Tunnel:根 Taskfile 新增 `PRODUCT_NAME`,macOS 打包为 `Tunnel.app` / `Tunnel.dmg`(卷名 Tunnel),Info.plist 补 `CFBundleDisplayName`,Linux 菜单项名为 Tunnel(Windows 快捷方式本就用 `INFO_PRODUCTNAME` = Tunnel)。可执行文件仍为 `tunnel-app`(与附带的 `tunnel` 在不区分大小写的文件系统上不冲突),单实例 ID、登录项标签、配置目录等内部标识不变;Release 文件名仍以 `tunnel-app_` 开头。
+- 端口:转发开着时端口不可修改(端口按钮禁用,悬停提示「关闭转发后才能修改端口」),后端 `SetPort` 对开着的转发返回 `ErrForwardOn`(代码 `forward_on`),不再在开着时重开转发;转发关着时改端口先试监听 127.0.0.1,被其他程序占用则拒绝并返回 `ErrPortBusy`(代码 `port_busy`),界面提示「端口 X 已被其他程序占用」(X 为刚输入的端口)并停在编辑状态。此前改到被占用的端口不会有任何提示,要到打开开关时才失败。新增 `TestSetPortRequiresForwardOff`、`TestSetPortValidatesOffForward`、`TestSetPortRejectsBusyPort` 与界面测试。
+- 文本输入框(服务器名称、地址、SSH 端口、登录用户、私钥、socket 目录、设备名字、端口)关闭自动大写、自动更正、拼写检查与自动填充(`plainText` 属性:`autoCapitalize` / `autoCorrect` / `autoComplete` = off,`spellCheck` = false):macOS 开启「自动将单词首字母大写」时,WebKit 输入框会把用户名首字母变大写。
 - 修复「测试连接」显示的主机指纹与核对命令对不上:服务器同时有 ECDSA 与 ED25519 主机密钥时,Go 默认协商 ECDSA,而界面让用户运行 `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`,指纹永远不一致(在真实服务器上复现:App 显示 ECDSA 的 `SHA256:8Hbz…`,系统 ssh 为 ED25519 的 `SHA256:OHVk…`)。`probe.Test` 的 `HostKeyAlgorithms` 改为 ED25519 优先(其次 ECDSA、RSA-SHA2),保存后会话按钉住公钥的类型协商,不受影响;核对命令改为按拿到的主机公钥类型给出 `ssh_host_{ed25519,ecdsa,rsa}_key.pub`。新增 `TestProbePrefersEd25519HostKey` 与界面测试。
 - 「服务器拒绝了这把私钥」的提示写明所用的登录用户(「服务器拒绝了用户 X 使用的这把私钥…」),「详情」里给出原始错误,含该私钥的 SHA256 指纹:`probe.AuthError` 新增 `User`、`KeyFingerprint`。便于区分用户名填错、选错私钥文件与公钥未加入 authorized_keys。
 - `desktop/` 的 Go 文件按 gofmt 重排 import(改模块路径后遗留)。

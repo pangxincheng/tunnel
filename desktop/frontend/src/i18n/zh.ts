@@ -109,6 +109,7 @@ const zh = {
   devOfflineKept: '离线，上线后恢复',
   devOfflineNoSeen: '离线',
   portBusy: '端口 {port} 已被其他程序占用',
+  portLocked: '关闭转发后才能修改端口',
   portInvalid: '端口需在 1024–65535 之间',
   portConflict: '端口 {port} 已分配给其他设备',
   deviceOffline: '{name} 离线，不能连接',

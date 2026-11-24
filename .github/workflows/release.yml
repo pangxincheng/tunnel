@@ -181,7 +181,7 @@ jobs:
         run: |
           wails3 task darwin:package:dmg ARCH=${{ matrix.arch }} VERSION="$VERSION"
           mkdir -p dist
-          mv bin/tunnel-app.dmg "dist/tunnel-app_${GITHUB_REF_NAME}_${{ matrix.target }}.dmg"
+          mv bin/Tunnel.dmg "dist/tunnel-app_${GITHUB_REF_NAME}_${{ matrix.target }}.dmg"
 
       - name: 打包 Windows(NSIS 安装程序)
         if: matrix.target == 'windows_amd64'

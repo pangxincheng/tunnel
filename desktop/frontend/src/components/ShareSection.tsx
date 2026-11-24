@@ -15,6 +15,7 @@ import { useCopy } from '../clipboard'
 import Switch from './Switch'
 import Dialog from './Dialog'
 import Countdown from './Countdown'
+import { plainText } from '../plainText'
 
 interface Props {
   server: ServerView
@@ -228,7 +229,7 @@ export default function ShareSection({ server, platform, sshd, disabled }: Props
               {t('deviceName')}
               <small>{t('deviceNameHint', { server: server.name })}</small>
             </label>
-            <input
+            <input {...plainText}
               id={`share-name-${server.name}`}
               className={nameMsg ? 'inp bad' : 'inp'}
               style={{ width: 180 }}

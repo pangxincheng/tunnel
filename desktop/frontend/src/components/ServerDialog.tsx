@@ -15,6 +15,7 @@ import { t } from '../i18n'
 import { actionError } from '../format'
 import { useCopy } from '../clipboard'
 import Dialog from './Dialog'
+import { plainText } from '../plainText'
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
 /** Command that prints, on the server, the fingerprint of the host key we got (by its type). */
@@ -212,21 +213,21 @@ export default function ServerDialog({ servers, editing, onClose }: Props) {
     >
       <div className="list form">
         <Field id="sd-name" label={t('fieldName')}>
-          <input id="sd-name" ref={nameRef} className={nameErr ? 'inp bad' : 'inp'} value={name} aria-invalid={!!nameErr} onChange={(e) => setName(e.target.value)} />
+          <input {...plainText} id="sd-name" ref={nameRef} className={nameErr ? 'inp bad' : 'inp'} value={name} aria-invalid={!!nameErr} onChange={(e) => setName(e.target.value)} />
         </Field>
         {nameErr && <div className="fld-err">{nameErr}</div>}
         <Field id="sd-host" label={t('fieldHost')}>
-          <input id="sd-host" ref={hostRef} className="inp" value={host} onChange={(e) => conn(setHost)(e.target.value)} />
+          <input {...plainText} id="sd-host" ref={hostRef} className="inp" value={host} onChange={(e) => conn(setHost)(e.target.value)} />
         </Field>
         <Field id="sd-port" label={t('fieldPort')}>
-          <input id="sd-port" className={portErr ? 'inp bad' : 'inp'} inputMode="numeric" value={port} aria-invalid={!!portErr} onChange={(e) => conn(setPort)(e.target.value)} />
+          <input {...plainText} id="sd-port" className={portErr ? 'inp bad' : 'inp'} inputMode="numeric" value={port} aria-invalid={!!portErr} onChange={(e) => conn(setPort)(e.target.value)} />
         </Field>
         {portErr && <div className="fld-err">{portErr}</div>}
         <Field id="sd-user" label={t('fieldUser')}>
-          <input id="sd-user" className="inp" value={user} onChange={(e) => conn(setUser)(e.target.value)} />
+          <input {...plainText} id="sd-user" className="inp" value={user} onChange={(e) => conn(setUser)(e.target.value)} />
         </Field>
         <Field id="sd-key" label={t('fieldKey')}>
-          <input id="sd-key" className="inp" value={keyPath} onChange={(e) => {
+          <input {...plainText} id="sd-key" className="inp" value={keyPath} onChange={(e) => {
               setPickErr('')
               conn(setKeyPath)(e.target.value)
             }}
@@ -241,7 +242,7 @@ export default function ServerDialog({ servers, editing, onClose }: Props) {
         </button>
         {advanced && (
           <Field id="sd-sock" label={t('socketDir')}>
-            <input id="sd-sock" className="inp" placeholder={t('socketAuto')} value={socketDir} onChange={(e) => conn(setSocketDir)(e.target.value)} />
+            <input {...plainText} id="sd-sock" className="inp" placeholder={t('socketAuto')} value={socketDir} onChange={(e) => conn(setSocketDir)(e.target.value)} />
           </Field>
         )}
       </div>

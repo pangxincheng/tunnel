@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { t } from '../i18n'
+import { plainText } from '../plainText'
 
 interface Props {
   port: number
   device: string
   live: boolean
   disabled?: boolean
+  /** The forward is on: the port cannot change until it is turned off. */
+  locked?: boolean
   invalid?: boolean
   /** Called with the raw text on Enter; resolve true to leave edit mode. */
   onSave: (text: string) => Promise<boolean>
@@ -14,7 +17,7 @@ interface Props {
 }
 
 /** The local port: a number that turns into an input on click (Enter saves, Esc cancels). */
-export default function PortField({ port, device, live, disabled, invalid, onSave, onCancel }: Props) {
+export default function PortField({ port, device, live, disabled, locked, invalid, onSave, onCancel }: Props) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
@@ -34,9 +37,9 @@ export default function PortField({ port, device, live, disabled, invalid, onSav
         ref={chipRef}
         type="button"
         className={live ? 'port live' : 'port'}
-        title={`127.0.0.1:${port}`}
+        title={locked ? t('portLocked') : `127.0.0.1:${port}`}
         aria-label={t('editPort', { name: device, port })}
-        disabled={disabled}
+        disabled={disabled || locked}
         onClick={() => {
           setDraft(String(port))
           setEditing(true)
@@ -62,7 +65,7 @@ export default function PortField({ port, device, live, disabled, invalid, onSav
   }
 
   return (
-    <input
+    <input {...plainText}
       ref={inputRef}
       className={invalid ? 'inp num bad' : 'inp num'}
       inputMode="numeric"

@@ -110,6 +110,7 @@ const en: Record<MsgKey, string> = {
   devOffline: 'Offline · last seen {d} ago',
   devOfflineKept: 'Offline, resumes when back',
   devOfflineNoSeen: 'Offline',
+  portLocked: 'Turn the forward off to change its port',
   portBusy: 'Port {port} is in use by another program',
   portInvalid: 'Port must be between 1024 and 65535',
   portConflict: 'Port {port} is assigned to another device',

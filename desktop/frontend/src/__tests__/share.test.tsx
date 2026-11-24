@@ -6,6 +6,7 @@ import { server } from './fixtures'
 import { setLang } from '../i18n'
 import ShareSection from '../components/ShareSection'
 
+import { expectPlainText } from './plainText'
 vi.mock('../api', async () => (await import('./apiMock')).apiMock)
 
 const up = { running: true, port: 22 }
@@ -21,6 +22,11 @@ describe('ShareSection', () => {
     setLang('zh')
     apiMock.errorCode.mockImplementation(((e: any) => String(e?.message ?? e).split(':')[0]) as any)
     apiMock.errorDetail.mockImplementation(((e: any) => String(e?.message ?? e).split(':').slice(1).join(':').trim()) as any)
+  })
+
+  it('the device name input never auto-capitalises', () => {
+    share()
+    expectPlainText(screen.getByRole('textbox'))
   })
 
   it('name input has the uniqueness subtitle', () => {

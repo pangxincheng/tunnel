@@ -79,6 +79,8 @@ var (
 	ErrUnknownServer = errors.New("unknown server")
 	ErrUnknownDevice = errors.New("unknown device")
 	ErrNameTaken     = errors.New("share name is taken by another device")
+	ErrPortBusy      = errors.New("the local port is in use by another program")
+	ErrForwardOn     = errors.New("turn the forward off before changing its port")
 )
 
 const (

@@ -49,6 +49,7 @@ export default function DeviceRow({ server, device, disabled, onCommands }: Prop
     else if (code === 'offline') setLocalErr(t('deviceOffline', { name: device.name }))
     else if (code === 'port_invalid') setLocalErr(t('portInvalid'))
     else if (code === 'port_conflict') setLocalErr(t('portConflict', { port }))
+    else if (code === 'forward_on') setLocalErr(t('portLocked'))
     else setLocalErr(errorDetail(e))
   }
 
@@ -98,6 +99,7 @@ export default function DeviceRow({ server, device, disabled, onCommands }: Prop
             device={device.name}
             live={live}
             disabled={disabled}
+            locked={device.on}
             invalid={!!errText}
             onSave={savePort}
             onCancel={() => setLocalErr('')}

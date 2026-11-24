@@ -324,6 +324,7 @@ type env struct {
 	share    *fakeShare
 	clock    *fakeClock
 	mu       sync.Mutex
+	busy     map[int]bool // local ports another program is listening on (PortFree)
 	sshd     sshd.Result
 	hostname string
 	changes  int
@@ -382,7 +383,7 @@ func startEnv(t *testing.T, path string, clock *fakeClock, prep ...func(*env)) *
 		Share:      e.share,
 		DetectSSHD: func(context.Context) sshd.Result { e.mu.Lock(); defer e.mu.Unlock(); e.detects++; return e.sshd },
 		DeviceID:   "self",
-		PortFree:   func(int) bool { return true },
+		PortFree:   func(p int) bool { e.mu.Lock(); defer e.mu.Unlock(); return !e.busy[p] },
 		Hostname:   func() (string, error) { return e.hostname, nil },
 		Now:        e.clock.Now,
 		OnChange: func(s AppState) {
@@ -408,6 +409,16 @@ func startEnv(t *testing.T, path string, clock *fakeClock, prep ...func(*env)) *
 }
 
 func (e *env) setSSHD(r sshd.Result) { e.mu.Lock(); e.sshd = r; e.mu.Unlock() }
+
+// setBusy marks a local port as taken by another program.
+func (e *env) setBusy(port int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.busy == nil {
+		e.busy = map[int]bool{}
+	}
+	e.busy[port] = true
+}
 
 func eventually(t *testing.T, what string, f func() bool) {
 	t.Helper()

@@ -4,6 +4,9 @@ vars:
   # Must differ from "tunnel" (the bundled CLI) so both fit in Contents/MacOS/
   # on case-insensitive filesystems.
   APP_NAME: "tunnel-app"
+  # Name people see: the macOS bundle (Tunnel.app) and dmg, the Linux menu
+  # entry; Windows takes it from INFO_PRODUCTNAME (build/windows/nsis).
+  PRODUCT_NAME: "Tunnel"
   BIN_DIR: "bin"
   PACKAGE_MANAGER: '{{.PACKAGE_MANAGER | default "npm"}}'
   VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'

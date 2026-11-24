@@ -5,6 +5,8 @@
             <string>APPL</string>
         <key>CFBundleName</key>
             <string>Tunnel</string>
+        <key>CFBundleDisplayName</key>
+            <string>Tunnel</string>
         <key>CFBundleExecutable</key>
             <string>tunnel-app</string>
         <key>CFBundleIdentifier</key>

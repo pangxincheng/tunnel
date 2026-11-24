@@ -133,38 +133,69 @@ func TestConnectedCountsOnlyLive(t *testing.T) {
 	}
 }
 
-func TestSetPortRestartsForward(t *testing.T) {
+// A forward that is on keeps its port: the UI locks the port while the switch
+// is on, and the backend refuses the change too.
+func TestSetPortRequiresForwardOff(t *testing.T) {
 	e := newEnv(t, cfgWith(srvCfg("home")))
-	s := e.ready("home", dev("a", "id-a", true), dev("b", "id-b", true))
+	s := e.ready("home", dev("a", "id-a", true))
 	if err := e.m.SetForward("home", "a", true); err != nil {
 		t.Fatal(err)
 	}
+	port := e.cfgServer("home").Forwards["a"].Port
+	n := len(s.Calls())
+	if err := e.m.SetPort("home", "a", 6000); !errors.Is(err, ErrForwardOn) {
+		t.Fatalf("got %v, want ErrForwardOn", err)
+	}
+	if f := e.cfgServer("home").Forwards["a"]; f.Port != port || !f.On {
+		t.Fatalf("forward changed: %+v", f)
+	}
+	if len(s.Calls()) != n {
+		t.Fatalf("session touched: %v", s.Calls())
+	}
+}
+
+func TestSetPortValidatesOffForward(t *testing.T) {
+	e := newEnv(t, cfgWith(srvCfg("home")))
+	s := e.ready("home", dev("a", "id-a", true), dev("b", "id-b", true))
+	n := len(s.Calls())
 	if err := e.m.SetPort("home", "a", 6000); err != nil {
 		t.Fatal(err)
 	}
-	calls := strings.Join(s.Calls(), ",")
-	if !strings.HasSuffix(calls, "remove a,add a 6000") {
-		t.Fatalf("calls %s", calls)
-	}
-	if f := e.cfgServer("home").Forwards["a"]; f.Port != 6000 || !f.On {
+	if f := e.cfgServer("home").Forwards["a"]; f.Port != 6000 || f.On {
 		t.Fatalf("%+v", f)
 	}
 	if err := e.m.SetPort("home", "a", 80); err == nil || e.device("home", "a").Err != "port_invalid" {
 		t.Fatalf("invalid: %v %+v", err, e.device("home", "a"))
 	}
-	if err := e.m.SetPort("home", "a", 5103); err == nil || e.device("home", "a").Err != "port_conflict" {
+	if err := e.m.SetPort("home", "a", e.device("home", "b").Port); err == nil || e.device("home", "a").Err != "port_conflict" {
 		t.Fatalf("conflict: %v %+v", err, e.device("home", "a"))
 	}
 	if e.cfgServer("home").Forwards["a"].Port != 6000 {
 		t.Fatal("rejected port persisted")
 	}
-	// port change on an off forward: no session calls
-	n := len(s.Calls())
-	if err := e.m.SetPort("home", "b", 7000); err != nil {
+	if len(s.Calls()) != n {
+		t.Fatalf("an off forward touched the session: %v", s.Calls())
+	}
+}
+
+// A port another program already listens on is refused when it is chosen,
+// not later when the switch is turned on.
+func TestSetPortRejectsBusyPort(t *testing.T) {
+	e := newEnv(t, cfgWith(srvCfg("home")))
+	e.ready("home", dev("a", "id-a", true))
+	port := e.device("home", "a").Port
+	e.setBusy(7000)
+	if err := e.m.SetPort("home", "a", 7000); !errors.Is(err, ErrPortBusy) {
+		t.Fatalf("got %v, want ErrPortBusy", err)
+	}
+	if d := e.device("home", "a"); d.Err != "" || d.Port != port {
+		t.Fatalf("%+v", d)
+	}
+	if err := e.m.SetPort("home", "a", 7001); err != nil {
 		t.Fatal(err)
 	}
-	if len(s.Calls()) != n {
-		t.Fatalf("calls %v", s.Calls())
+	if d := e.device("home", "a"); d.Err != "" || d.Port != 7001 {
+		t.Fatalf("%+v", d)
 	}
 }
 

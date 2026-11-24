@@ -1,0 +1,7 @@
+<!-- macOS 26 Icon Composer 图层(../appicon.icon/Assets/tunnel_glyph.svg 的源):去掉底板的图案,底色由 icon.json 的 fill 提供。
+     width/height 必须是 1024:Icon Composer 按 SVG 的固有尺寸(pt)放进 1024pt 的画布。 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 128 128">
+  <rect x="57" y="30" width="14" height="68" rx="4" fill="#39414f"/>
+  <line x1="18" y1="64" x2="100" y2="64" stroke="#4cc38a" stroke-width="11" stroke-linecap="round"/>
+  <path d="M92 48 L114 64 L92 80 Z" fill="#4cc38a"/>
+</svg>

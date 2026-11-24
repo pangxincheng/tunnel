@@ -45,8 +45,10 @@ func errCode(err error) string {
 		return "no_sshd"
 	case errors.Is(err, core.ErrNameTaken):
 		return "name_taken"
-	case errors.As(err, &lis):
+	case errors.As(err, &lis), errors.Is(err, core.ErrPortBusy):
 		return "port_busy"
+	case errors.Is(err, core.ErrForwardOn):
+		return "forward_on"
 	case errors.Is(err, core.ErrUnknownServer), errors.Is(err, core.ErrUnknownDevice):
 		return "unknown"
 	}
