@@ -1,4 +1,13 @@
-# 编译产物(本仓库的构建输出统一放 /tmp 或 dist/)
+# 编译产物(命令行的构建输出统一放 /tmp 或 cli/dist/)
 /dist/
 /cli/dist/
 *.test
+
+.DS_Store
+.superpowers/
+
+# 桌面端(Wails)构建产物与依赖
+desktop/bin/
+desktop/frontend/node_modules/
+desktop/frontend/dist/
+desktop/build/bin/

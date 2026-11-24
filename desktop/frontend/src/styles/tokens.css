@@ -1,0 +1,25 @@
+:root {
+  --ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  --code: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
+/* The theme classes / data-accent are set on both <html> and .app. */
+:root, .app {
+  --canvas: #F3F4F6; --side: #ECEEF1; --surface: #FFFFFF; --ink: #16191D; --muted: #6A717B; --faint: #9AA1AA; --line: #E1E4E8;
+  --fault: #B3422E; --fault-soft: #F8E9E5; --fault-ink: #7A2B1D;
+  --hover: rgba(22, 25, 29, .05); --sel: rgba(22, 25, 29, .07); --scrim: rgba(22, 25, 29, .28); --shadow: rgba(22, 25, 29, .12);
+  --accent-green: #13795B; --accent-blue: #2457D6; --accent-violet: #6544E0; --accent-amber: #A85A06; --accent-graphite: #3E4651;
+}
+:root.dark, .app.dark {
+  --canvas: #1A1C20; --side: #15171A; --surface: #23262B; --ink: #E8EAED; --muted: #A0A7B0; --faint: #6E757E; --line: #2F3338;
+  --fault: #E06A52; --fault-soft: #3A221D; --fault-ink: #F3B3A6;
+  --hover: rgba(255, 255, 255, .04); --sel: rgba(255, 255, 255, .08); --scrim: rgba(0, 0, 0, .5); --shadow: rgba(0, 0, 0, .5);
+  --accent-green: #3DBE8B; --accent-blue: #6E9BFF; --accent-violet: #A592FF; --accent-amber: #F0A24B; --accent-graphite: #C9CFD7;
+}
+
+:is(:root, .app)[data-accent="green"] { --live: var(--accent-green); }
+:is(:root, .app)[data-accent="blue"] { --live: var(--accent-blue); }
+:is(:root, .app)[data-accent="violet"] { --live: var(--accent-violet); }
+:is(:root, .app)[data-accent="amber"] { --live: var(--accent-amber); }
+:is(:root, .app)[data-accent="graphite"] { --live: var(--accent-graphite); }
+:root, .app { --live-soft: color-mix(in srgb, var(--live) 14%, transparent); }
