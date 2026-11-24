@@ -1,6 +1,8 @@
 # CHANGELOG
 
 ## 2026-11-24
+- 大窗口 / 全屏:内容列最大宽度由 680px 改为 1000px 并在主区域居中,此前全屏时内容只占左侧 680px,右侧大片空白。
+- 界面缩放:新增「显示」菜单(macOS;其他平台为 View),放大 / 缩小 / 实际大小对应 ⌘/Ctrl + = / − / 0,档位 80%、90%、100%、110%、125%、150%、175%、200%;设置「外观」里新增「界面大小」(A− / 百分比〔点击还原〕/ A+)。用 webview 原生缩放(`WebviewWindow.SetZoom`,文字、按钮、日志终端一起缩放,不用 CSS zoom),档位存在设置 `zoom` 里,启动时恢复。Wails 自带的 ZoomIn / ZoomOut 每次只变 5% 且不能小于 100%,未采用。新增 `TestNormZoom`、`TestStepZoom`、`TestZoomAppliedAndSaved`、`TestViewMenuShortcuts` 与设置界面测试(另补自动清理的设置测试)。
 - 修复 macOS 上对话框(尤其是新的日志窗口)盖到红绿灯按钮下面:窗口用隐藏式标题栏,关闭 / 最小化 / 全屏按钮画在网页内容最上方 46px 的区域里,而对话框遮罩只留 24px 边距,较高的对话框顶部会伸进这块区域,按钮看起来浮在对话框上。macOS 下遮罩顶部边距改为 46px。样式测试的选择器转义补全(支持 `[]` 等字符)。
 - 共享服务「已安装但未运行」时(例如 macOS 上更新服务失败,旧服务被卸载而新服务没装回去),「重试」改为按已安装的模式重新安装服务(系统模式会请求管理员授权),把它重新加载并启动;此前「重试」只给运行中的服务发消息,必然失败,关掉再打开共享也只会「恢复」,App 内没有办法让服务重新跑起来。共享失败 / 未运行时不再在状态后面显示「无人登录也在线」(它只表示系统模式,与「共享服务未运行」并列容易被误读为仍在线)。新增 `TestRetryShareNotRunningSystemMode`,`TestRetryShareNotRunning` 改为断言重新安装。
 - 共享日志改在 App 内查看:「查看日志」打开只读的日志窗口(xterm.js,`@xterm/xterm` 6 + fit / search 插件,按需懒加载,主包不增大),先显示最近 1000 行,之后实时追加;可搜索(Enter / Shift+Enter 上下查找)、调字号(10–20,记在设置 `log_font_size` 里)、清屏、复制全部;颜色跟随 App 的浅色 / 深色模式与主题色,Esc 关闭。共享开着时共享行上就有「查看日志」,不再只在出错时出现。后端新增 `internal/logtail`(`Follow` 像 `tail -n N -f` 一样跟随文件,处理截断 / 轮转;`FollowCmd` 跟随命令输出)与 `AppService.StartLog` / `StopLog`,以 `share-log` 事件推送;macOS / Windows 读服务日志文件,Linux 跟随 `journalctl [--user] -u tunnel-<profile> -f`(此前 Linux 只给出一条命令让用户自己去终端运行)。

@@ -7,13 +7,14 @@ import (
 // appMenu is the application menu for goos (runtime.GOOS). On macOS the
 // standard app menu supplies Quit, and the edit menu makes copy / paste work
 // in text fields.
-func appMenu(goos string, quit, closeWindow func()) *application.Menu {
+func appMenu(goos string, quit, closeWindow func(), zoom func(dir int)) *application.Menu {
 	m := application.NewMenu()
 	if goos == "darwin" {
 		m.AddRole(application.AppMenu)
 	}
 	addFileMenu(m, goos, quit, closeWindow)
 	m.AddRole(application.EditMenu)
+	addViewMenu(m, goos, zoom)
 	if goos == "darwin" {
 		m.AddRole(application.WindowMenu)
 	}

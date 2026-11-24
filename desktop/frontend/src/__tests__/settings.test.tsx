@@ -33,6 +33,33 @@ describe('Settings dialog', () => {
     expect(apiMock.UpdateSettings.mock.calls[0][0]).toMatchObject({ mode: 'dark', accent: 'green', lang: 'zh' })
   })
 
+  it('interface size: A+ / A− step through the levels, the value resets to 100%', async () => {
+    const { user } = await openSettings()
+    expect(screen.getByRole('button', { name: '还原 (100%)' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: '放大界面' }))
+    expect(apiMock.UpdateSettings).toHaveBeenLastCalledWith(expect.objectContaining({ zoom: 1.1 }))
+    pushState(appState({ servers: [server()], selected: 'home', settings: { ...base().settings, zoom: 1.1 } }))
+    expect(screen.getByRole('button', { name: '还原 (110%)' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: '还原 (110%)' }))
+    expect(apiMock.UpdateSettings).toHaveBeenLastCalledWith(expect.objectContaining({ zoom: 1 }))
+    await user.click(screen.getByRole('button', { name: '缩小界面' }))
+    expect(apiMock.UpdateSettings).toHaveBeenLastCalledWith(expect.objectContaining({ zoom: 1 }))
+  })
+
+  it('interface size buttons stop at the ends; the hint names the platform shortcut', async () => {
+    apiMock.GetState.mockResolvedValue(appState({ servers: [server()], selected: 'home', platform: 'darwin', settings: { ...base().settings, zoom: 2 } }))
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: '设置' }))
+    expect((screen.getByRole('button', { name: '放大界面' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText('也可以用 ⌘+ / ⌘− / ⌘0')).toBeTruthy()
+  })
+
+  it('auto clean: choosing 30 days saves auto_clean_days 30', async () => {
+    const { user } = await openSettings()
+    await user.click(screen.getByRole('button', { name: '30 天' }))
+    expect(apiMock.UpdateSettings).toHaveBeenLastCalledWith(expect.objectContaining({ auto_clean_days: 30 }))
+  })
+
   it('two quick changes before a state event are both sent', async () => {
     const { user } = await openSettings()
     await user.click(screen.getByRole('button', { name: '深色' }))

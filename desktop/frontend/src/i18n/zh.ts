@@ -162,6 +162,11 @@ const zh = {
   devRemoveNotConnected: '连上服务器后才能删除设备',
   autoClean: '自动清理离线设备',
   autoCleanHint: '从服务器上删除离线太久的设备；开着转发的设备不会被清理',
+  uiSize: '界面大小',
+  uiSizeHint: '也可以用 {mod}+ / {mod}− / {mod}0',
+  uiSmaller: '缩小界面',
+  uiLarger: '放大界面',
+  uiReset: '还原',
   autoCleanOff: '关闭',
 }
 

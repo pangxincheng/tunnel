@@ -66,7 +66,9 @@ type AppService struct {
 	probe func(context.Context, probe.Params) (probe.Result, error)
 	open  func(path string) error
 	emit  func(name string, data any) // frontend events; set by main
-	quit  func()                      // set by main
+	// applyZoom sets the window's interface size; set by main.
+	applyZoom func(z float64)
+	quit      func() // set by main
 
 	ctx    context.Context // from ServiceStartup; parent of log streams
 	logMu  sync.Mutex
@@ -160,7 +162,8 @@ func (s *AppService) UpdateShare(server string) error { return wrapErr(s.mgr.Upd
 // UpdateSettings saves the settings and, when LaunchAtLogin changed, adds or
 // removes the login item.
 func (s *AppService) UpdateSettings(st config.Settings) error {
-	was := s.mgr.State().Settings.LaunchAtLogin
+	prev := s.mgr.State().Settings
+	was := prev.LaunchAtLogin
 	var autoErr error
 	if st.LaunchAtLogin != was {
 		if !st.LaunchAtLogin {
@@ -174,8 +177,14 @@ func (s *AppService) UpdateSettings(st config.Settings) error {
 			st.LaunchAtLogin = was // keep the persisted flag truthful
 		}
 	}
+	if st.Zoom != 0 {
+		st.Zoom = normZoom(st.Zoom)
+	}
 	if err := s.mgr.UpdateSettings(st); err != nil {
 		return wrapErr(err)
+	}
+	if st.Zoom != prev.Zoom && s.applyZoom != nil {
+		s.applyZoom(normZoom(st.Zoom))
 	}
 	if autoErr != nil {
 		return fmt.Errorf("autostart: %w", autoErr)

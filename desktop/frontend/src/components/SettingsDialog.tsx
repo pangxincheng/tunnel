@@ -25,8 +25,29 @@ function Seg({ value, options, onPick }: { value: string; options: [string, stri
   )
 }
 
+// Interface sizes, same as the View menu's zoom steps (zoom.go).
+export const ZOOM_LEVELS = [0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2]
+
+/** Index of the level nearest to a stored zoom; 0 / missing = 100%. */
+function zoomIndex(z: number | undefined): number {
+  const v = z && z > 0 ? z : 1
+  let best = 0
+  ZOOM_LEVELS.forEach((l, i) => {
+    if (Math.abs(l - v) < Math.abs(ZOOM_LEVELS[best] - v)) best = i
+  })
+  return best
+}
+
 /** The dialog keeps no copy of the settings: every control reflects the `settings` prop. */
-export default function SettingsDialog({ settings, onClose }: { settings: Settings; onClose: () => void }) {
+export default function SettingsDialog({
+  settings,
+  platform = '',
+  onClose,
+}: {
+  settings: Settings
+  platform?: string
+  onClose: () => void
+}) {
   const [version, setVersion] = useState('')
   const [err, setErr] = useState('')
   const doneRef = useRef<HTMLButtonElement>(null)
@@ -48,6 +69,8 @@ export default function SettingsDialog({ settings, onClose }: { settings: Settin
       live = false
     }
   }, [])
+
+  const zi = zoomIndex(settings.zoom)
 
   const update = (patch: Partial<Settings>) => {
     const next = { ...latest.current, ...patch }
@@ -107,6 +130,41 @@ export default function SettingsDialog({ settings, onClose }: { settings: Settin
                     onClick={() => update({ accent: a.id })}
                   />
                 ))}
+              </span>
+            </div>
+            <div className="frow">
+              <span className="lbl">
+                {t('uiSize')}
+                <small>{t('uiSizeHint', { mod: platform === 'darwin' ? '⌘' : 'Ctrl' })}</small>
+              </span>
+              <span className="stepper">
+                <button
+                  type="button"
+                  className="lb quiet"
+                  aria-label={t('uiSmaller')}
+                  disabled={zi === 0}
+                  onClick={() => update({ zoom: ZOOM_LEVELS[zi - 1] })}
+                >
+                  A−
+                </button>
+                <button
+                  type="button"
+                  className="lb quiet val"
+                  title={t('uiReset')}
+                  aria-label={`${t('uiReset')} (${Math.round(ZOOM_LEVELS[zi] * 100)}%)`}
+                  onClick={() => update({ zoom: 1 })}
+                >
+                  {Math.round(ZOOM_LEVELS[zi] * 100)}%
+                </button>
+                <button
+                  type="button"
+                  className="lb quiet"
+                  aria-label={t('uiLarger')}
+                  disabled={zi === ZOOM_LEVELS.length - 1}
+                  onClick={() => update({ zoom: ZOOM_LEVELS[zi + 1] })}
+                >
+                  A+
+                </button>
               </span>
             </div>
             <div className="frow">

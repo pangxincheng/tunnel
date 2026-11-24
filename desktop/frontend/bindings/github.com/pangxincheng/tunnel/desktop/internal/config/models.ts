@@ -79,6 +79,11 @@ export interface Settings {
      * LogFontSize is the share log viewer's font size in px; 0 = default.
      */
     "log_font_size": number;
+
+    /**
+     * Zoom is the interface size (1 = 100%); 0 = default.
+     */
+    "zoom": number;
 }
 
 export interface ShareIntent {

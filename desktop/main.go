@@ -95,7 +95,12 @@ func main() {
 			win.Minimise()
 		}
 	}
-	app.Menu.Set(appMenu(runtime.GOOS, quit, closeWindow))
+	svc.applyZoom = func(z float64) { win.SetZoom(z) }
+	app.Menu.Set(appMenu(runtime.GOOS, quit, closeWindow, svc.zoom))
+	// Restore the remembered interface size once the window exists.
+	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		win.SetZoom(normZoom(mgr.State().Settings.Zoom))
+	})
 	hasTray = setupTray(app, show, quit)
 
 	win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {

@@ -57,6 +57,8 @@ type Settings struct {
 	AutoCleanDays int `json:"auto_clean_days"`
 	// LogFontSize is the share log viewer's font size in px; 0 = default.
 	LogFontSize int `json:"log_font_size"`
+	// Zoom is the interface size (1 = 100%); 0 = default.
+	Zoom float64 `json:"zoom"`
 }
 
 type Config struct {

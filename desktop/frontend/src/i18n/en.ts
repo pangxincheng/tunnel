@@ -164,6 +164,11 @@ const en: Record<MsgKey, string> = {
   devRemoveNotConnected: 'Connect to the server to remove devices',
   autoClean: 'Clean up offline devices',
   autoCleanHint: 'Remove devices that have been offline too long from the server; devices with the forward on are kept',
+  uiSize: 'Interface size',
+  uiSizeHint: 'Or use {mod}+ / {mod}− / {mod}0',
+  uiSmaller: 'Smaller interface',
+  uiLarger: 'Larger interface',
+  uiReset: 'Reset',
   autoCleanOff: 'Off',
 }
 
