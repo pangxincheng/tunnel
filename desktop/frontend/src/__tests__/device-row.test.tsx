@@ -43,7 +43,7 @@ describe('DeviceRow', () => {
 
   it('offline device with the forward on keeps the switch usable and says it resumes', () => {
     row({ online: false, on: true })
-    expect(screen.getByText('离线,上线后恢复')).toBeTruthy()
+    expect(screen.getByText('离线，上线后恢复')).toBeTruthy()
     expect((screen.getByRole('switch') as HTMLButtonElement).disabled).toBe(false)
   })
 
@@ -139,7 +139,7 @@ describe('DeviceRow', () => {
     apiMock.SetForward.mockRejectedValueOnce(new Error('offline: gone'))
     row()
     await userEvent.click(screen.getByRole('switch'))
-    expect(await screen.findByText('nas 离线,不能连接')).toBeTruthy()
+    expect(await screen.findByText('nas 离线，不能连接')).toBeTruthy()
   })
 
   it('shows state device.err sentences', () => {
@@ -173,9 +173,9 @@ describe('ServerDetail devices and commands dialog', () => {
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
     const sv = server({ devices: [device({ name: 'nas', port: 5103, on: true })] })
     render(<ServerDetail server={sv} platform="linux" sshd={{ running: true, port: 22 }} />)
-    await u.click(screen.getByRole('button', { name: /连接命令: nas/ }))
+    await u.click(screen.getByRole('button', { name: /nas 的连接命令/ }))
     expect(screen.getByText('nas 的连接命令')).toBeTruthy()
-    expect(screen.getByText('转发已打开,连接 127.0.0.1:5103 就是 nas')).toBeTruthy()
+    expect(screen.getByText('转发已打开，连接 127.0.0.1:5103 就是 nas')).toBeTruthy()
     const dlg = screen.getByRole('dialog')
     const buttons = Array.from(dlg.querySelectorAll('.dlg-f button'))
     expect(buttons.map((b) => b.textContent)).toEqual(['完成'])
@@ -222,7 +222,7 @@ describe('ServerDetail devices and commands dialog', () => {
     const props = { platform: 'linux', sshd: { running: true, port: 22 } }
     const withDev = server({ devices: [device({ name: 'nas' })] })
     const view = render(<ServerDetail server={withDev} {...props} />)
-    await u.click(screen.getByRole('button', { name: /连接命令: nas/ }))
+    await u.click(screen.getByRole('button', { name: /nas 的连接命令/ }))
     expect(screen.getByRole('dialog')).toBeTruthy()
     view.rerender(<ServerDetail server={server({ devices: [] })} {...props} />)
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -234,7 +234,7 @@ describe('ServerDetail devices and commands dialog', () => {
     const u = userEvent.setup()
     Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
     render(<ServerDetail server={server({ devices: [device({ name: 'nas' })] })} platform="linux" sshd={{ running: true, port: 22 }} />)
-    await u.click(screen.getByRole('button', { name: /连接命令: nas/ }))
+    await u.click(screen.getByRole('button', { name: /nas 的连接命令/ }))
     await u.click(screen.getByRole('button', { name: '复制 ssh' }))
     expect(await screen.findByText('复制失败')).toBeTruthy()
     expect(screen.queryByText('已复制')).toBeNull()

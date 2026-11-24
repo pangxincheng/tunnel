@@ -69,7 +69,7 @@ describe('Banner', () => {
   it('disconnected: grey banner with 连接', () => {
     const { container } = render(<Banner server={server({ conn: 'disconnected' })} />)
     expect(container.querySelector('.banner.paused')).toBeTruthy()
-    expect(screen.getByText('已断开 home:共享和转发都已停止,开关状态会保留')).toBeTruthy()
+    expect(screen.getByText('已断开 home：共享和转发都已停止，开关状态会保留')).toBeTruthy()
     fireEvent.click(screen.getByText('连接'))
     expect(apiMock.SetConnected).toHaveBeenCalledWith('home', true)
   })

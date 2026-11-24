@@ -114,7 +114,7 @@ export default function DeviceRow({ server, device, disabled, onCommands }: Prop
           type="button"
           className="copy"
           title={t('showCmds')}
-          aria-label={`${t('showCmds')}: ${device.name}`}
+          aria-label={t('cmdsTitle', { name: device.name })}
           disabled={disabled}
           onClick={() => onCommands(device.name)}
         >

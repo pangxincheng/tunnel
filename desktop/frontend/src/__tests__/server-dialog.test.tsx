@@ -72,7 +72,7 @@ describe('Server dialog', () => {
     expect(screen.getByText('在服务器上运行以下命令核对：')).toBeTruthy()
     expect(screen.getByText('ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub')).toBeTruthy()
     expect(saveBtn().disabled).toBe(true)
-    await user.click(screen.getByRole('button', { name: '指纹一致,信任' }))
+    await user.click(screen.getByRole('button', { name: '指纹一致，信任' }))
     expect(saveBtn().disabled).toBe(false)
   })
 
@@ -88,24 +88,35 @@ describe('Server dialog', () => {
     expect(await screen.findByText(FP)).toBeTruthy()
   })
 
-  const errCases: [string, string, string][] = [
+  // [backend message, code, sentence shown, raw detail behind 详情 (if any)]
+  const errCases: [string, string, string, string?][] = [
     [
       'passphrase: x',
       'passphrase',
-      'Tunnel 需要一把没有口令的私钥。可以为它单独生成一把:ssh-keygen -t ed25519 -N "" -f ~/.ssh/tunnel_ed25519,并把公钥加到服务器的 ~/.ssh/authorized_keys',
+      'Tunnel 需要一把没有口令的私钥。可以为它单独生成一把：ssh-keygen -t ed25519 -N "" -f ~/.ssh/tunnel_ed25519，并把公钥加到服务器的 ~/.ssh/authorized_keys',
     ],
     ['auth: denied', 'auth', '服务器拒绝了这把私钥，请确认公钥已加入服务器的 ~/.ssh/authorized_keys'],
-    ['dial: connection refused', 'dial', '连不上 work.example.com:22：connection refused'],
-    ['socketdir: permission denied', 'socketdir', '已登录，但无法创建 socket 目录：permission denied'],
+    ['dial: connection refused', 'dial', '连不上 work.example.com:22，请检查地址、端口和网络', 'connection refused'],
+    ['socketdir: permission denied', 'socketdir', '已登录，但无法在服务器上创建 socket 目录', 'permission denied'],
     ['boom: weird', '', 'boom: weird'],
   ]
-  it.each(errCases)('test error %s -> sentence', async (msg, _code, text) => {
+  it.each(errCases)('test error %s -> sentence', async (msg, _code, text, detail) => {
     apiMock.TestConnection.mockRejectedValue(new Error(msg))
     const { user } = await open()
     await fillAdd(user)
     await user.click(screen.getByRole('button', { name: '测试连接' }))
     const alert = await screen.findByRole('alert')
-    expect(alert.textContent).toBe(text)
+    if (detail) {
+      // The sentence stands alone; the raw (usually English) error sits behind 详情.
+      expect(within(alert).getByText(text)).toBeTruthy()
+      const more = alert.querySelector('details')!
+      expect(more.querySelector('summary')!.textContent).toBe('详情')
+      expect(more.open).toBe(false)
+      expect(more.querySelector('code')!.textContent).toBe(detail)
+    } else {
+      expect(alert.textContent).toBe(text)
+      expect(alert.querySelector('details')).toBeNull()
+    }
     expect(saveBtn().disabled).toBe(true)
   })
 
@@ -138,7 +149,7 @@ describe('Server dialog', () => {
     await user.click(screen.getByRole('button', { name: '测试连接' }))
     await screen.findByText(FP)
     expect(saveBtn().disabled).toBe(true)
-    await user.click(screen.getByRole('button', { name: '指纹一致,信任' }))
+    await user.click(screen.getByRole('button', { name: '指纹一致，信任' }))
     expect(saveBtn().disabled).toBe(false)
     await user.click(saveBtn())
     expect(apiMock.UpdateServer.mock.calls[0][1]).toMatchObject({ host_key: 'ssh-ed25519 AAAAnew' })
@@ -149,7 +160,7 @@ describe('Server dialog', () => {
     const { user } = await open()
     await fillAdd(user)
     await user.click(screen.getByRole('button', { name: '测试连接' }))
-    await user.click(await screen.findByRole('button', { name: '指纹一致,信任' }))
+    await user.click(await screen.findByRole('button', { name: '指纹一致，信任' }))
     expect(saveBtn().disabled).toBe(false)
     await user.type(screen.getByLabelText('登录用户'), 'x')
     expect(saveBtn().disabled).toBe(true)
@@ -182,7 +193,7 @@ describe('Server dialog', () => {
     const { user } = await open()
     await fillAdd(user)
     await user.click(screen.getByRole('button', { name: '测试连接' }))
-    await user.click(await screen.findByRole('button', { name: '指纹一致,信任' }))
+    await user.click(await screen.findByRole('button', { name: '指纹一致，信任' }))
     await user.click(saveBtn())
     expect(apiMock.AddServer).toHaveBeenCalledTimes(1)
     expect(apiMock.AddServer.mock.calls[0][0]).toMatchObject({ name: 'work', host: 'work.example.com', port: 22, user: 'tunnel', key_path: '/k/id', host_key: 'ssh-ed25519 AAAAnew', socket_dir: '' })
@@ -196,7 +207,7 @@ describe('Server dialog', () => {
     const { user } = await open()
     await fillAdd(user)
     await user.click(screen.getByRole('button', { name: '测试连接' }))
-    await user.click(await screen.findByRole('button', { name: '指纹一致,信任' }))
+    await user.click(await screen.findByRole('button', { name: '指纹一致，信任' }))
     await user.click(saveBtn())
     expect((await screen.findByText('disk full')).closest('.dlg-f')).toBeTruthy()
     expect(apiMock.Select).not.toHaveBeenCalled()
@@ -242,7 +253,7 @@ describe('Server dialog', () => {
     expect((screen.getByRole('button', { name: '测试连接' }) as HTMLButtonElement).disabled).toBe(false)
     await act(async () => resolve(probeOk))
     expect(screen.queryByText(FP)).toBeNull()
-    expect(screen.queryByRole('button', { name: '指纹一致,信任' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '指纹一致，信任' })).toBeNull()
     expect(screen.queryByRole('button', { name: '正在测试…' })).toBeNull()
     expect(saveBtn().disabled).toBe(true)
   })
@@ -292,7 +303,7 @@ describe('Server dialog', () => {
     const { user } = await open(appState({ servers: [server({ host_key: '' })], selected: 'home' }), 'edit')
     expect(saveBtn().disabled).toBe(true)
     await user.click(screen.getByRole('button', { name: '测试连接' }))
-    await user.click(await screen.findByRole('button', { name: '指纹一致,信任' }))
+    await user.click(await screen.findByRole('button', { name: '指纹一致，信任' }))
     expect(saveBtn().disabled).toBe(false)
     await user.click(saveBtn())
     expect(apiMock.UpdateServer.mock.calls[0][1]).toMatchObject({ host_key: 'ssh-ed25519 AAAAnew' })

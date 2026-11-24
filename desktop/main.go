@@ -84,19 +84,25 @@ func main() {
 	showWindow.Store(&show)
 	quit := func() { quitting.Store(true); app.Quit() }
 	svc.quit = quit
-	app.Menu.Set(appMenu(app, quit))
-	hasTray := setupTray(app, show, quit)
+	var hasTray bool // set below, before the app runs
+	// Closing the window only hides it (to the tray, or minimised when there
+	// is no tray); both the close button and Cmd/Ctrl+W land here.
+	closeWindow := func() {
+		if hasTray {
+			win.Hide()
+		} else {
+			win.Minimise()
+		}
+	}
+	app.Menu.Set(appMenu(runtime.GOOS, quit, closeWindow))
+	hasTray = setupTray(app, show, quit)
 
 	win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		if quitting.Load() {
 			return
 		}
 		e.Cancel()
-		if hasTray {
-			win.Hide()
-		} else {
-			win.Minimise()
-		}
+		closeWindow()
 	})
 	if runtime.GOOS == "darwin" { // dock-icon click re-opens the window
 		app.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(*application.ApplicationEvent) { show() })

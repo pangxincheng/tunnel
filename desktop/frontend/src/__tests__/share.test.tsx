@@ -44,7 +44,7 @@ describe('ShareSection', () => {
 
   it('name_err is shown under the input and the switch is disabled', () => {
     share({ name_err: 'taken' })
-    expect(screen.getByText('「macbook」在 home 上已被另一台设备使用,换一个名字')).toBeTruthy()
+    expect(screen.getByText('「macbook」在 home 上已被另一台设备使用，换一个名字')).toBeTruthy()
     expect((screen.getByRole('switch', { name: '共享这台电脑' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
@@ -62,7 +62,7 @@ describe('ShareSection', () => {
     const u = userEvent.setup()
     share({ on: true, phase: 'failed', err: 'auth failed' })
     expect(screen.getByText('auth failed')).toBeTruthy()
-    expect(screen.getByText('连接失败,已停止重试')).toBeTruthy()
+    expect(screen.getByText('连接失败，已停止重试')).toBeTruthy()
     await u.click(screen.getByText('重试'))
     expect(apiMock.RetryShare).toHaveBeenCalledWith('home')
     await u.click(screen.getByText('查看日志'))
@@ -147,9 +147,9 @@ describe('ShareSection', () => {
 
   it('sshd off sentences are one full sentence per OS', () => {
     const cases: [string, string][] = [
-      ['darwin', '本机 SSH 服务未开启,不能共享。在 系统设置 → 通用 → 共享 中打开“远程登录”'],
-      ['linux', '本机 SSH 服务未开启,不能共享。安装并启动 openssh-server'],
-      ['windows', '本机 SSH 服务未开启,不能共享。在 设置 → 系统 → 可选功能 中添加“OpenSSH 服务器”并启动服务'],
+      ['darwin', '本机 SSH 服务未开启，不能共享。在 系统设置 → 通用 → 共享 中打开“远程登录”'],
+      ['linux', '本机 SSH 服务未开启，不能共享。安装并启动 openssh-server'],
+      ['windows', '本机 SSH 服务未开启，不能共享。在 设置 → 系统 → 可选功能 中添加“OpenSSH 服务器”并启动服务'],
     ]
     for (const [os, text] of cases) {
       const { container, unmount } = share({}, os, { running: false, port: 0 })
@@ -169,7 +169,7 @@ describe('ShareSection', () => {
     share({}, 'linux')
     await userEvent.click(screen.getByRole('switch', { name: '共享这台电脑' }))
     const note = await screen.findByRole('status')
-    expect(note.textContent).toBe('本机 SSH 服务未开启,不能共享。安装并启动 openssh-server')
+    expect(note.textContent).toBe('本机 SSH 服务未开启，不能共享。安装并启动 openssh-server')
   })
 
   it('an active share can always be switched off (sshd down or name_err)', async () => {
@@ -187,7 +187,7 @@ describe('ShareSection', () => {
     const input = screen.getByLabelText(/设备名字/)
     await u.clear(input)
     await u.type(input, 'nas{Enter}')
-    expect(await screen.findByText('「nas」在 home 上已被另一台设备使用,换一个名字')).toBeTruthy()
+    expect(await screen.findByText('「nas」在 home 上已被另一台设备使用，换一个名字')).toBeTruthy()
     await u.type(input, '2')
     expect(screen.queryByText(/已被另一台设备使用/)).toBeNull()
   })

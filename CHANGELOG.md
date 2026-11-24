@@ -1,6 +1,10 @@
 # CHANGELOG
 
 ## 2026-11-23
+- 真机试用后的修正(macOS,隔离配置,未安装任何服务):
+  - 中文文案改用全角标点:`zh.ts` 里紧挨汉字的半角 `,` `:` `?` 与半角括号改为「，」「：」「？」「（）」(如「连到它上面，就能」「删除 {name}？」「已开启（端口 {port}）」),新增测试 `Chinese copy uses full-width punctuation` 防止回退;spec §7.2 删除确认文案同步。设备行「连接命令」按钮的无障碍名称改用 `cmdsTitle`(「nas 的连接命令」),不再在代码里拼半角冒号。
+  - 测试连接失败时只显示一整句:`dial` 为「连不上 {host}:{port}，请检查地址、端口和网络」,`socketdir` 为「已登录，但无法在服务器上创建 socket 目录」;原始错误(多为英文,如 `ssh connection failed: dial tcp …`)收进默认折叠的「详情」(`errDetails`)。英文文案同步。
+  - Cmd+W(macOS)/ Ctrl+W(Windows、Linux)关闭窗口,行为与关闭按钮相同(隐藏到托盘,无托盘时最小化):macOS 应用菜单新增「文件 → 关闭窗口」,Windows / Linux 的「Tunnel」菜单新增「关闭窗口」;`appMenu` 改为按 `goos` 构建,菜单项抽到 `addFileMenu`,新增 `TestFileMenuShortcuts`。README 验证清单补此项。
 - 修复共享开关与已安装服务不同步(终审 I1 / I2):共享服务已安装但未运行(CLI 退出码 3)时,`SetShare(off)` 与 `SetConnected(false)` 不再失败,照常保存意图;`SetShare(on)` / 重新连接时 `Resume` 遇到未运行同样只保存意图。共享同步循环(不与进行中的操作抢 op 锁)在服务状态变化时(如被系统重新拉起)与意图比对:运行未暂停但意图关闭或服务器已断开 → 暂停一次;已暂停但意图开启且已连接 → 恢复一次,失败不重复,直到下一次状态变化。共享行的设备名字与运行方式改为取自已安装服务(spec §6.3),同步时写回配置,`SetShareSystem` 也按已安装服务的方式判断是否需要切换;配置从未决定过的服务器(如配置被重置)发现正在运行的服务时将其接管为「正在共享」。`config.ShareIntent` 新增 `decided`(用户开 / 关过或已接管),重新生成 bindings。
 - 新增错误代码(终审 I3 / M7):`config.CheckPort` 返回包裹 `config.ErrPortRange` / `ErrPortConflict` 的错误,`errcode` 映射为 `port_invalid:` / `port_conflict:`,`core.SetPort` 用 `errors.Is` 判断;`sharesvc` 的 pause / resume / retry / set-name 遇到退出码 3 返回 `sharesvc.ErrNotRunning`,映射为 `not_running:`,前端 `api.ts` 代码表与文案「共享服务没有在运行，请查看日志」/ "The sharing service is not running. Check the log." 同步,共享区的重试 / 更新失败显示该句。
 - 单实例(终审 I4):`application.Options.SingleInstance`(UniqueID `com.pangxincheng.tunnel-app`),再次启动时退出并把已运行实例的窗口调到前台(同时刷新当前服务器)。

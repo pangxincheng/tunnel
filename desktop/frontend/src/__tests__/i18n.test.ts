@@ -12,8 +12,16 @@ describe('i18n', () => {
 
   it('formats the delete confirmation verbatim', () => {
     expect(t('deleteConfirm', { name: 'home', n: 2 })).toBe(
-      '删除 home?会停止在它上面的共享和 2 个转发,并删除这台服务器在本机的配置。服务器上的数据不受影响。',
+      '删除 home？会停止在它上面的共享和 2 个转发，并删除这台服务器在本机的配置。服务器上的数据不受影响。',
     )
+  })
+
+  it('Chinese copy uses full-width punctuation', () => {
+    // Half-width , : ; ! ? touching a Chinese character, or any half-width
+    // parenthesis, reads as a typo in Chinese text.
+    const halfWidth = /[一-鿿][,:;!?]|[,:;!?][一-鿿]|[()]/
+    const bad = Object.entries(zh).filter(([, v]) => halfWidth.test(v))
+    expect(bad).toEqual([])
   })
 
   it('formats the server summary as one sentence', () => {

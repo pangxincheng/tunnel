@@ -30,7 +30,7 @@ describe('Delete confirm', () => {
 
   it('uses the plan text with n = open forwards, focuses 取消', async () => {
     const { dlg } = await open()
-    expect(dlg.textContent).toContain('删除 home?会停止在它上面的共享和 2 个转发,并删除这台服务器在本机的配置。服务器上的数据不受影响。')
+    expect(dlg.textContent).toContain('删除 home？会停止在它上面的共享和 2 个转发，并删除这台服务器在本机的配置。服务器上的数据不受影响。')
     expect(document.activeElement).toBe(screen.getByRole('button', { name: '取消' }))
     expect(screen.getByRole('button', { name: '删除' }).className).toContain('dangerfill')
   })

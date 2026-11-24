@@ -27,6 +27,12 @@ interface Props {
   onClose: () => void
 }
 
+/** A failed connection test: one sentence, plus the raw error behind 详情 when it adds information. */
+interface TestError {
+  text: string
+  detail?: string
+}
+
 interface Probe {
   fingerprint: string
   hostKey: string
@@ -65,7 +71,7 @@ export default function ServerDialog({ servers, editing, onClose }: Props) {
   // Editing starts out trusted: the stored host key stays valid until a connection setting changes.
   const [trusted, setTrusted] = useState(!!ed?.host_key)
   const [testing, setTesting] = useState(false)
-  const [testErr, setTestErr] = useState('')
+  const [testErr, setTestErr] = useState<TestError | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveErr, setSaveErr] = useState('')
   const [pickErr, setPickErr] = useState('')
@@ -89,7 +95,7 @@ export default function ServerDialog({ servers, editing, onClose }: Props) {
     setTesting(false)
     setProbe(null)
     setTrusted(false)
-    setTestErr('')
+    setTestErr(null)
   }
 
   async function pickKey() {
@@ -102,18 +108,18 @@ export default function ServerDialog({ servers, editing, onClose }: Props) {
     }
   }
 
-  function describe(e: unknown): string {
+  function describe(e: unknown): TestError {
     switch (errorCode(e)) {
       case 'passphrase':
-        return t('errPassphrase')
+        return { text: t('errPassphrase') }
       case 'auth':
-        return t('errAuth')
+        return { text: t('errAuth') }
       case 'dial':
-        return t('errDial', { host: host.trim(), port: portNum ?? port, detail: errorDetail(e) })
+        return { text: t('errDial', { host: host.trim(), port: portNum ?? port }), detail: errorDetail(e) }
       case 'socketdir':
-        return t('errSocketDir', { detail: errorDetail(e) })
+        return { text: t('errSocketDir'), detail: errorDetail(e) }
       default:
-        return errorMessage(e)
+        return { text: errorMessage(e) }
     }
   }
 
@@ -121,7 +127,7 @@ export default function ServerDialog({ servers, editing, onClose }: Props) {
     if (!connValid || portNum === null) return
     const seq = ++testSeq.current
     setTesting(true)
-    setTestErr('')
+    setTestErr(null)
     setProbe(null)
     setTrusted(false)
     try {
@@ -235,7 +241,17 @@ export default function ServerDialog({ servers, editing, onClose }: Props) {
       </div>
       {testErr && (
         <div className="errbox" role="alert">
-          {testErr}
+          {testErr.detail ? (
+            <>
+              <div>{testErr.text}</div>
+              <details className="errmore">
+                <summary>{t('errDetails')}</summary>
+                <code className="mono">{testErr.detail}</code>
+              </details>
+            </>
+          ) : (
+            testErr.text
+          )}
         </div>
       )}
       {probe && (
