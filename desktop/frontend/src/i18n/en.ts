@@ -36,7 +36,7 @@ const en: Record<MsgKey, string> = {
   needTrust: 'Test the connection and trust the fingerprint to save',
   save: 'Save',
   errPassphrase: 'Tunnel needs a private key without a passphrase. Generate a dedicated one with: ssh-keygen -t ed25519 -N "" -f ~/.ssh/tunnel_ed25519, then add the public key to ~/.ssh/authorized_keys on the server',
-  errAuth: 'The server rejected this key. Make sure its public key is in ~/.ssh/authorized_keys on the server',
+  errAuth: 'The server rejected this key for user {user}. Make sure its public key is in ~/.ssh/authorized_keys of {user} on the server',
   errDial: 'Cannot reach {host}:{port}. Check the address, port and network',
   errSocketDir: 'Logged in, but the socket directory cannot be created on the server',
   errDetails: 'Details',

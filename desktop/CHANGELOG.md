@@ -1,6 +1,9 @@
 # CHANGELOG
 
 ## 2026-11-24
+- 修复「测试连接」显示的主机指纹与核对命令对不上:服务器同时有 ECDSA 与 ED25519 主机密钥时,Go 默认协商 ECDSA,而界面让用户运行 `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`,指纹永远不一致(在真实服务器上复现:App 显示 ECDSA 的 `SHA256:8Hbz…`,系统 ssh 为 ED25519 的 `SHA256:OHVk…`)。`probe.Test` 的 `HostKeyAlgorithms` 改为 ED25519 优先(其次 ECDSA、RSA-SHA2),保存后会话按钉住公钥的类型协商,不受影响;核对命令改为按拿到的主机公钥类型给出 `ssh_host_{ed25519,ecdsa,rsa}_key.pub`。新增 `TestProbePrefersEd25519HostKey` 与界面测试。
+- 「服务器拒绝了这把私钥」的提示写明所用的登录用户(「服务器拒绝了用户 X 使用的这把私钥…」),「详情」里给出原始错误,含该私钥的 SHA256 指纹:`probe.AuthError` 新增 `User`、`KeyFingerprint`。便于区分用户名填错、选错私钥文件与公钥未加入 authorized_keys。
+- `desktop/` 的 Go 文件按 gofmt 重排 import(改模块路径后遗留)。
 - 改为与命令行同步发布:由统一的 `vX.Y.Z` tag(自 `v1.5.0` 起)经 `.github/workflows/release.yml` 打包,与命令行同在一个 Release;版本说明改由 `.github/scripts/release-notes.sh` 生成(桌面端与命令行两节)。附带 CLI 的版本号在发布时即该 tag。README「发布」一节同步。
 - 主题(深色类名与主题色)改在 `useLayoutEffect` 中写到 `<html>`,与内容在同一次提交生效:启动时不再先闪一帧浅色;也修复了 CI 中偶发失败的 `puts the theme on the document element too`(内容出现时 `useEffect` 可能尚未执行,本地无法复现,按时序分析修复)。
 

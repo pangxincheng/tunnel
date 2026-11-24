@@ -76,6 +76,17 @@ describe('Server dialog', () => {
     expect(saveBtn().disabled).toBe(false)
   })
 
+  it.each([
+    ['ecdsa-sha2-nistp256 AAAAec', 'ssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub'],
+    ['ssh-rsa AAAArsa', 'ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub'],
+  ])('the check command follows the host key type (%s)', async (hostKey, cmd) => {
+    apiMock.TestConnection.mockResolvedValue({ ...probeOk, host_key: hostKey })
+    const { user } = await open()
+    await fillAdd(user)
+    await user.click(screen.getByRole('button', { name: '测试连接' }))
+    expect(await screen.findByText(cmd)).toBeTruthy()
+  })
+
   it('the test button is disabled and says 正在测试… while running', async () => {
     let resolve!: (v: typeof probeOk) => void
     apiMock.TestConnection.mockImplementation(() => new Promise((r) => (resolve = r)) as any)
@@ -95,7 +106,12 @@ describe('Server dialog', () => {
       'passphrase',
       'Tunnel 需要一把没有口令的私钥。可以为它单独生成一把：ssh-keygen -t ed25519 -N "" -f ~/.ssh/tunnel_ed25519，并把公钥加到服务器的 ~/.ssh/authorized_keys',
     ],
-    ['auth: denied', 'auth', '服务器拒绝了这把私钥，请确认公钥已加入服务器的 ~/.ssh/authorized_keys'],
+    [
+      'auth: ssh authentication failed for user "tunnel" with key SHA256:k3y: unable to authenticate',
+      'auth',
+      '服务器拒绝了用户 tunnel 使用的这把私钥，请确认它的公钥已加入服务器上 tunnel 的 ~/.ssh/authorized_keys',
+      'ssh authentication failed for user "tunnel" with key SHA256:k3y: unable to authenticate',
+    ],
     ['dial: connection refused', 'dial', '连不上 work.example.com:22，请检查地址、端口和网络', 'connection refused'],
     ['socketdir: permission denied', 'socketdir', '已登录，但无法在服务器上创建 socket 目录', 'permission denied'],
     ['boom: weird', '', 'boom: weird'],

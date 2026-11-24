@@ -17,7 +17,12 @@ import { useCopy } from '../clipboard'
 import Dialog from './Dialog'
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
-const CHECK_CMD = 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub'
+/** Command that prints, on the server, the fingerprint of the host key we got (by its type). */
+function checkCmd(hostKey: string): string {
+  const type = hostKey.split(' ')[0] ?? ''
+  const file = type.startsWith('ecdsa-') ? 'ecdsa' : type === 'ssh-rsa' ? 'rsa' : 'ed25519'
+  return `ssh-keygen -lf /etc/ssh/ssh_host_${file}_key.pub`
+}
 
 interface Props {
   /** Every server (to keep names unique). */
@@ -113,7 +118,8 @@ export default function ServerDialog({ servers, editing, onClose }: Props) {
       case 'passphrase':
         return { text: t('errPassphrase') }
       case 'auth':
-        return { text: t('errAuth') }
+        // The detail names the user and the key fingerprint that were tried.
+        return { text: t('errAuth', { user: user.trim() }), detail: errorDetail(e) }
       case 'dial':
         return { text: t('errDial', { host: host.trim(), port: portNum ?? port }), detail: errorDetail(e) }
       case 'socketdir':
@@ -264,8 +270,8 @@ export default function ServerDialog({ servers, editing, onClose }: Props) {
             <>
               <p>{t('fpHint')}</p>
               <div className="cmdline">
-                <code>{CHECK_CMD}</code>
-                <button type="button" className="lb" aria-label={t('copyCmd')} onClick={() => copy('chk', CHECK_CMD)}>
+                <code>{checkCmd(probe.hostKey)}</code>
+                <button type="button" className="lb" aria-label={t('copyCmd')} onClick={() => copy('chk', checkCmd(probe.hostKey))}>
                   {copied?.id === 'chk' ? (copied.ok ? t('copied') : t('copyFailed')) : t('copyCmd')}
                 </button>
               </div>

@@ -35,9 +35,17 @@ type Result struct {
 var ErrPassphrase = errors.New("passphrase-protected key")
 
 // AuthError:服务器拒绝了这把私钥。
-type AuthError struct{ Err error }
+// User and KeyFingerprint say what was tried, so a wrong user or key file can
+// be told apart from a key missing in authorized_keys.
+type AuthError struct {
+	Err            error
+	User           string
+	KeyFingerprint string // ssh.FingerprintSHA256 of the key's public half
+}
 
-func (e *AuthError) Error() string { return "ssh authentication failed: " + e.Err.Error() }
+func (e *AuthError) Error() string {
+	return fmt.Sprintf("ssh authentication failed for user %q with key %s: %v", e.User, e.KeyFingerprint, e.Err)
+}
 func (e *AuthError) Unwrap() error { return e.Err }
 
 // DialError:网络不可达、握手失败或超时。
@@ -76,6 +84,15 @@ func Test(ctx context.Context, p Params) (Result, error) {
 	cfg := &ssh.ClientConfig{
 		User: p.User,
 		Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		// Prefer the ed25519 host key: the dialog tells the user to check the
+		// fingerprint with `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`,
+		// and Go's default order would pick ECDSA when the server has both.
+		// Sessions later pin exactly this key's type (tunnel.Config.HostPub).
+		HostKeyAlgorithms: []string{
+			ssh.KeyAlgoED25519,
+			ssh.KeyAlgoECDSA256, ssh.KeyAlgoECDSA384, ssh.KeyAlgoECDSA521,
+			ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSASHA256,
+		},
 		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
 			hostKey = key
 			return nil
@@ -100,7 +117,7 @@ func Test(ctx context.Context, p Params) (Result, error) {
 			return res, &DialError{Err: ctx.Err()}
 		}
 		if strings.Contains(err.Error(), "unable to authenticate") {
-			return res, &AuthError{Err: err}
+			return res, &AuthError{Err: err, User: p.User, KeyFingerprint: ssh.FingerprintSHA256(signer.PublicKey())}
 		}
 		return res, &DialError{Err: err}
 	}

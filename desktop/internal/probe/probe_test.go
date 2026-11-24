@@ -2,7 +2,9 @@ package probe
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/pem"
 	"errors"
@@ -58,7 +60,9 @@ func writeKey(t *testing.T, priv ed25519.PrivateKey, pass string) string {
 	return p
 }
 
-func startServer(t *testing.T, authorized ssh.PublicKey) *testServer {
+// startServer serves SSH with an ed25519 host key (s.hostPub), plus any
+// extra host keys, which are offered as well.
+func startServer(t *testing.T, authorized ssh.PublicKey, extraHostKeys ...ssh.Signer) *testServer {
 	t.Helper()
 	hostSigner, _ := newSigner(t)
 	cfg := &ssh.ServerConfig{
@@ -68,6 +72,9 @@ func startServer(t *testing.T, authorized ssh.PublicKey) *testServer {
 			}
 			return nil, errors.New("denied")
 		},
+	}
+	for _, k := range extraHostKeys {
+		cfg.AddHostKey(k)
 	}
 	cfg.AddHostKey(hostSigner)
 	home := t.TempDir()
@@ -157,6 +164,30 @@ func TestProbeOK(t *testing.T) {
 	}
 }
 
+// The UI asks the user to check the fingerprint with
+// `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`; a real sshd also holds
+// ECDSA and RSA host keys, and the Go client would otherwise pick ECDSA, whose
+// fingerprint never matches that command.
+func TestProbePrefersEd25519HostKey(t *testing.T) {
+	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ecSigner, err := ssh.NewSignerFromKey(ecKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs, cpriv := newSigner(t)
+	srv := startServer(t, cs.PublicKey(), ecSigner)
+	res, err := Test(t.Context(), srv.params(writeKey(t, cpriv, "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Fingerprint != ssh.FingerprintSHA256(srv.hostPub) {
+		t.Errorf("got host key %q, want the ed25519 one", res.HostKey)
+	}
+}
+
 func TestProbeExplicitSocketDir(t *testing.T) {
 	cs, cpriv := newSigner(t)
 	srv := startServer(t, cs.PublicKey())
@@ -188,6 +219,19 @@ func TestProbeAuthRejected(t *testing.T) {
 	var ae *AuthError
 	if !errors.As(err, &ae) {
 		t.Fatalf("err = %v (%T)", err, err)
+	}
+	// The user and the key's fingerprint are reported, so a wrong user or key
+	// file can be told apart from a missing authorized_keys entry.
+	otherSigner, err2 := ssh.NewSignerFromKey(other)
+	if err2 != nil {
+		t.Fatal(err2)
+	}
+	fp := ssh.FingerprintSHA256(otherSigner.PublicKey())
+	if ae.User != "u" || ae.KeyFingerprint != fp {
+		t.Errorf("AuthError user %q fp %q, want u / %s", ae.User, ae.KeyFingerprint, fp)
+	}
+	if msg := ae.Error(); !strings.Contains(msg, fp) || !strings.Contains(msg, `"u"`) {
+		t.Errorf("message %q lacks user or fingerprint", msg)
 	}
 }
 

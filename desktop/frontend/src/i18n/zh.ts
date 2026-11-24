@@ -34,7 +34,7 @@ const zh = {
   needTrust: '保存前需要测试连接并信任指纹',
   save: '保存',
   errPassphrase: 'Tunnel 需要一把没有口令的私钥。可以为它单独生成一把：ssh-keygen -t ed25519 -N "" -f ~/.ssh/tunnel_ed25519，并把公钥加到服务器的 ~/.ssh/authorized_keys',
-  errAuth: '服务器拒绝了这把私钥，请确认公钥已加入服务器的 ~/.ssh/authorized_keys',
+  errAuth: '服务器拒绝了用户 {user} 使用的这把私钥，请确认它的公钥已加入服务器上 {user} 的 ~/.ssh/authorized_keys',
   errDial: '连不上 {host}:{port}，请检查地址、端口和网络',
   errSocketDir: '已登录，但无法在服务器上创建 socket 目录',
   errDetails: '详情',
