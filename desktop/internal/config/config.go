@@ -52,6 +52,11 @@ type Settings struct {
 	Lang            string `json:"lang"`   // system|zh|en
 	LaunchAtLogin   bool   `json:"launch_at_login"`
 	RestoreForwards bool   `json:"restore_forwards"`
+	// AutoCleanDays removes devices offline for more than this many days
+	// from the server (forward-on devices excepted); 0 = off.
+	AutoCleanDays int `json:"auto_clean_days"`
+	// LogFontSize is the share log viewer's font size in px; 0 = default.
+	LogFontSize int `json:"log_font_size"`
 }
 
 type Config struct {

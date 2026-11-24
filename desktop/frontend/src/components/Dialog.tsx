@@ -8,6 +8,8 @@ interface Props {
   /** Element to focus on open; defaults to the dialog itself. */
   initialFocus?: RefObject<HTMLElement | null>
   wide?: boolean
+  /** Large, resizable-content layout for the log viewer. */
+  log?: boolean
   footer?: ReactNode
   children: ReactNode
 }
@@ -24,7 +26,7 @@ const FOCUSABLE =
  * and returns to the opener on unmount. The enter animation is a CSS animation
  * on the element, so it only plays on mount.
  */
-export default function Dialog({ title, subtitle, onCancel, onSubmit, initialFocus, wide, footer, children }: Props) {
+export default function Dialog({ title, subtitle, onCancel, onSubmit, initialFocus, wide, log, footer, children }: Props) {
   const dlgRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
   const downOnScrim = useRef(false)
@@ -97,7 +99,7 @@ export default function Dialog({ title, subtitle, onCancel, onSubmit, initialFoc
     >
       <div
         ref={dlgRef}
-        className={wide ? 'dlg wide' : 'dlg'}
+        className={log ? 'dlg log' : wide ? 'dlg wide' : 'dlg'}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

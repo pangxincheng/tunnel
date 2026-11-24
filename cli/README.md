@@ -67,7 +67,11 @@ go test ./...
 ```
 StreamLocalBindUnlink yes        # 必需:重连时替换上次残留的 socket 文件
 AllowStreamLocalForwarding yes   # 默认即 yes;配置被收紧过时需确认
+ClientAliveInterval 15           # 建议:设备睡眠 / 断网后,约 1 分钟内清掉它留下的旧会话
+ClientAliveCountMax 4
 ```
+
+不设 `ClientAlive*` 时,设备不辞而别(睡眠、换网络)留下的旧会话要等 TCP 保活(Linux 默认约 2 小时 11 分钟)才会被 sshd 清掉,期间 `ss -xl` 能看到同一个 socket 有两个监听者。这不影响连接:重连时 `StreamLocalBindUnlink` 已把路径换成新的监听,旧的只是占着一个 sshd 进程。
 
 ### 2. 内网服务器上启动 server
 

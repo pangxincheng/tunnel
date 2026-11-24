@@ -2,7 +2,9 @@ package tunnel
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"path"
 	"sort"
 	"strings"
@@ -110,4 +112,35 @@ func probeSocket(ctx context.Context, sc *ssh.Client, sock string) bool {
 	case <-ctx.Done():
 		return false
 	}
+}
+
+// ErrDeviceOnline 表示要删除记录的设备当前在线。
+var ErrDeviceOnline = errors.New("设备在线,不能删除它的记录")
+
+// RemoveOfflineDevice 删除 dir 下离线设备 name 的记录(<name>.json 与残留的
+// <name>.sock),不论它属于哪台设备。删除前重新探测 socket:在线则返回
+// ErrDeviceOnline、什么都不删。被删的设备下次连上服务器时会重新登记。
+// 文件不存在不算错误。
+func RemoveOfflineDevice(ctx context.Context, sc *ssh.Client, dir, name string) error {
+	if err := ValidateName(name); err != nil {
+		return err
+	}
+	sock := path.Join(dir, name+sockSuffix)
+	if probeSocket(ctx, sc, sock) {
+		return ErrDeviceOnline
+	}
+	if err := ctx.Err(); err != nil { // 取消时探测结果不可信
+		return err
+	}
+	c, err := sftp.NewClient(sc)
+	if err != nil {
+		return fmt.Errorf("打开 SFTP: %w", err)
+	}
+	defer c.Close()
+	for _, p := range []string{sock, path.Join(dir, name+infoSuffix)} {
+		if err := c.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("删除 %s: %w", p, err)
+		}
+	}
+	return nil
 }

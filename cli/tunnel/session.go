@@ -495,3 +495,12 @@ func (s *Session) serveForward(f *sessionForward) {
 		}()
 	}
 }
+
+// RemoveOfflineDevice 用当前连接删除离线设备 name 的记录,见 RemoveOfflineDevice。
+func (s *Session) RemoveOfflineDevice(ctx context.Context, name string) error {
+	sc, dir, err := s.current()
+	if err != nil {
+		return err
+	}
+	return RemoveOfflineDevice(ctx, sc, dir, name)
+}

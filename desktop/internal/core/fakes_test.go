@@ -66,6 +66,22 @@ func (s *fakeSession) Devices(ctx context.Context) ([]tunnel.Device, error) {
 	return append([]tunnel.Device(nil), s.devices...), nil
 }
 
+func (s *fakeSession) RemoveOfflineDevice(ctx context.Context, name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls = append(s.calls, "rmdev "+name)
+	for i, d := range s.devices {
+		if d.Name == name {
+			if d.Online {
+				return tunnel.ErrDeviceOnline
+			}
+			s.devices = append(s.devices[:i:i], s.devices[i+1:]...)
+			break
+		}
+	}
+	return nil
+}
+
 func (s *fakeSession) setState(st tunnel.ConnState) {
 	s.mu.Lock()
 	s.state = st

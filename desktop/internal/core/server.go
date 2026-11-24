@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -134,7 +135,11 @@ func (m *Manager) refreshLoop(ctx context.Context, s *server, c *conn) {
 		case <-t.C:
 		case <-c.refresh:
 		}
-		m.refreshDevices(ctx, s, c)
+		for _, name := range m.refreshDevices(ctx, s, c) {
+			if err := m.removeDevice(ctx, s, c, name); err != nil {
+				m.d.Logger.Warn("auto clean: removing offline device failed", "device", name, "err", err)
+			}
+		}
 	}
 }
 
@@ -152,25 +157,22 @@ func (m *Manager) liveDevices(ctx context.Context, c *conn) ([]tunnel.Device, bo
 	return list, true
 }
 
-func (m *Manager) refreshDevices(ctx context.Context, s *server, c *conn) {
+// refreshDevices applies a fresh device list and returns the devices due for
+// automatic cleanup (Settings.AutoCleanDays).
+func (m *Manager) refreshDevices(ctx context.Context, s *server, c *conn) (stale []string) {
 	list, ok := m.liveDevices(ctx, c)
 	if !ok {
-		return
+		return nil
 	}
 	m.mu.Lock()
 	defer m.notify()
 	defer m.mu.Unlock()
 	if s.conn != c { // disconnected or restarted meanwhile
-		return
+		return nil
 	}
-	var sc *config.Server
-	for name, rs := range m.servers {
-		if rs == s {
-			sc, _ = m.cfg.Server(name)
-		}
-	}
+	sc := m.configOfLocked(s)
 	if sc == nil {
-		return
+		return nil
 	}
 	now := m.d.Now()
 	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
@@ -215,6 +217,95 @@ func (m *Manager) refreshDevices(ctx context.Context, s *server, c *conn) {
 	if changed {
 		_ = m.saveLocked()
 	}
+	return m.staleLocked(sc, list, now)
+}
+
+// staleLocked lists offline devices last seen more than AutoCleanDays ago.
+// Devices with the forward on (the user keeps them) and devices with no
+// known time are never cleaned automatically.
+func (m *Manager) staleLocked(sc *config.Server, list []tunnel.Device, now time.Time) []string {
+	days := m.cfg.Settings.AutoCleanDays
+	if days <= 0 {
+		return nil
+	}
+	cutoff := now.Add(-time.Duration(days) * 24 * time.Hour)
+	var out []string
+	for _, d := range list {
+		if d.Online || d.DeviceID == m.d.DeviceID || sc.Forwards[d.Name].On {
+			continue
+		}
+		seen := sc.LastSeen[d.Name]
+		if d.StartedAt.After(seen) {
+			seen = d.StartedAt
+		}
+		if !seen.IsZero() && seen.Before(cutoff) {
+			out = append(out, d.Name)
+		}
+	}
+	return out
+}
+
+// configOfLocked returns the config entry of runtime server s; caller holds mu.
+func (m *Manager) configOfLocked(s *server) *config.Server {
+	for name, rs := range m.servers {
+		if rs == s {
+			sc, _ := m.cfg.Server(name)
+			return sc
+		}
+	}
+	return nil
+}
+
+// RemoveDevice deletes an offline device's record from the server (it
+// registers again the next time it connects) and forgets its local forward
+// settings. An online device is refused with ErrDeviceOnline.
+func (m *Manager) RemoveDevice(server, device string) error {
+	m.mu.Lock()
+	sc, s, err := m.lookupLocked(server)
+	if err != nil {
+		m.mu.Unlock()
+		return err
+	}
+	d, listed := m.findDeviceLocked(s, device)
+	_, has := sc.Forwards[device]
+	c, ctx := s.conn, m.ctx
+	m.mu.Unlock()
+	switch {
+	case !listed && !has:
+		return ErrUnknownDevice
+	case listed && d.Online:
+		return ErrDeviceOnline
+	case c == nil || c.sess.State().Phase != tunnel.PhaseReady:
+		return tunnel.ErrNotConnected
+	}
+	return m.removeDevice(ctx, s, c, device)
+}
+
+// removeDevice asks the server to delete device's record, then forgets it
+// locally. Must be called without mu.
+func (m *Manager) removeDevice(ctx context.Context, s *server, c *conn, device string) error {
+	rctx, cancel := context.WithTimeout(ctx, devicesTimeout)
+	err := c.sess.RemoveOfflineDevice(rctx, device)
+	cancel()
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.notify()
+	defer m.mu.Unlock()
+	sc := m.configOfLocked(s)
+	if sc == nil {
+		return nil
+	}
+	if f, ok := sc.Forwards[device]; ok && f.On && s.conn != nil {
+		s.conn.sess.RemoveForward(device)
+	}
+	delete(sc.Forwards, device)
+	delete(sc.LastSeen, device)
+	delete(s.fwdErr, device)
+	s.devices = slices.DeleteFunc(s.devices, func(d tunnel.Device) bool { return d.Name == device })
+	sc.Devices = slices.DeleteFunc(sc.Devices, func(d tunnel.DeviceInfo) bool { return d.Name == device })
+	return m.saveLocked()
 }
 
 func sameInfos(a, b []tunnel.DeviceInfo) bool {

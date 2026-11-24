@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useRef, useState } from 'react'
 import {
-  OpenLog,
   RetryShare,
   SetShare,
   SetShareName,
@@ -9,9 +8,9 @@ import {
   errorCode,
   errorDetail,
   type ServerView,
+  type Settings,
 } from '../api'
 import { t, type MsgKey } from '../i18n'
-import { useCopy } from '../clipboard'
 import Switch from './Switch'
 import Dialog from './Dialog'
 import Countdown from './Countdown'
@@ -21,6 +20,7 @@ interface Props {
   server: ServerView
   platform: string
   sshd: { running: boolean; port: number }
+  settings: Settings
   disabled?: boolean
 }
 
@@ -30,16 +30,19 @@ const SSHD_OFF: Record<string, MsgKey> = {
   linux: 'sshdOffLinux',
 }
 
-type Note = { kind: 'text'; text: string } | { kind: 'journal'; cmd: string }
+// xterm.js is large: load the viewer only when it is first opened.
+const LogViewer = lazy(() => import('./LogViewer'))
 
-export default function ShareSection({ server, platform, sshd, disabled }: Props) {
+type Note = { kind: 'text'; text: string }
+
+export default function ShareSection({ server, platform, sshd, settings, disabled }: Props) {
   const { share } = server
   const [draft, setDraft] = useState(share.name)
   const focused = useRef(false)
   const [nameErr, setNameErr] = useState('')
   const [note, setNote] = useState<Note | null>(null)
   const [confirmVault, setConfirmVault] = useState(false)
-  const [copyResult, copy] = useCopy()
+  const [logOpen, setLogOpen] = useState(false)
   const attempted = useRef('')
   const noteTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => () => clearTimeout(noteTimer.current), [])
@@ -85,16 +88,9 @@ export default function ShareSection({ server, platform, sshd, disabled }: Props
     void run(SetShareName(server.name, name))
   }
 
-  const openLog = async () => {
+  const openLog = () => {
     setNote(null)
-    try {
-      await OpenLog(server.name)
-    } catch (e) {
-      const code = errorCode(e)
-      if (code === 'journal') setNote({ kind: 'journal', cmd: errorDetail(e) })
-      else if (code === 'nolog') setNote({ kind: 'text', text: t('logMissing') })
-      else setNote({ kind: 'text', text: errorDetail(e) })
-    }
+    setLogOpen(true)
   }
 
   const toggleSystem = (next: boolean) => {
@@ -172,6 +168,11 @@ export default function ShareSection({ server, platform, sshd, disabled }: Props
               )}
             </div>
           </div>
+          {share.on && !failed && (
+            <button type="button" className="lb quiet" onClick={openLog}>
+              {t('viewLogs')}
+            </button>
+          )}
           <Switch
             checked={share.on}
             label={t('shareThis')}
@@ -187,7 +188,7 @@ export default function ShareSection({ server, platform, sshd, disabled }: Props
               <button type="button" className="lb" disabled={locked} onClick={() => void run(RetryShare(server.name))}>
                 {t('retry')}
               </button>
-              <button type="button" className="lb quiet" disabled={disabled} onClick={() => void openLog()}>
+              <button type="button" className="lb quiet" disabled={disabled} onClick={openLog}>
                 {t('viewLogs')}
               </button>
             </div>
@@ -207,19 +208,7 @@ export default function ShareSection({ server, platform, sshd, disabled }: Props
 
         {note && (
           <div className="errbox" role="status">
-            {note.kind === 'text' ? (
-              note.text
-            ) : (
-              <>
-                <div>{t('logJournal')}</div>
-                <div className="cmdline">
-                  <code className="mono">{note.cmd}</code>
-                  <button type="button" className="lb" onClick={() => copy('log', note.cmd)}>
-                    {copyResult?.id === 'log' ? (copyResult.ok ? t('copied') : t('copyFailed')) : t('copyCmd')}
-                  </button>
-                </div>
-              </>
-            )}
+            {note.text}
           </div>
         )}
 
@@ -318,6 +307,11 @@ export default function ShareSection({ server, platform, sshd, disabled }: Props
         >
           <p className="hint">{t('fileVaultBody')}</p>
         </Dialog>
+      )}
+      {logOpen && (
+        <Suspense fallback={null}>
+          <LogViewer server={server.name} settings={settings} onClose={() => setLogOpen(false)} />
+        </Suspense>
       )}
     </div>
   )

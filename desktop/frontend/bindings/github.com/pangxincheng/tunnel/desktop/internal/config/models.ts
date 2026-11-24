@@ -68,6 +68,17 @@ export interface Settings {
     "lang": string;
     "launch_at_login": boolean;
     "restore_forwards": boolean;
+
+    /**
+     * AutoCleanDays removes devices offline for more than this many days
+     * from the server (forward-on devices excepted); 0 = off.
+     */
+    "auto_clean_days": number;
+
+    /**
+     * LogFontSize is the share log viewer's font size in px; 0 = default.
+     */
+    "log_font_size": number;
 }
 
 export interface ShareIntent {

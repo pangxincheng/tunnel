@@ -1,17 +1,26 @@
 import { useState } from 'react'
-import { SetForward, SetPort, errorCode, errorDetail, type DeviceView, type ServerView } from '../api'
-import { t } from '../i18n'
+import { RemoveDevice, SetForward, SetPort, errorCode, errorDetail, type DeviceView, type ServerView } from '../api'
+import { getLang, t } from '../i18n'
 import { osLabel, since } from '../format'
 import { useNow } from '../useNow'
 import Switch from './Switch'
 import PortField from './PortField'
 import { CopyIcon } from './icons'
+import Dialog from './Dialog'
 
 interface Props {
   server: ServerView
   device: DeviceView
   disabled?: boolean
   onCommands: (device: string) => void
+}
+
+/** Local date and time of an RFC 3339 timestamp; "" when missing. */
+function when(iso: string | undefined): string {
+  if (!iso) return ''
+  const at = Date.parse(iso)
+  if (Number.isNaN(at) || at <= 0) return ''
+  return new Date(at).toLocaleString(getLang() === 'zh' ? 'zh-CN' : 'en')
 }
 
 /** Sentence for a device.err code from the state; "" for none/unknown. */
@@ -26,6 +35,9 @@ export default function DeviceRow({ server, device, disabled, onCommands }: Prop
   const [localErr, setLocalErr] = useState('')
   const [attempt, setAttempt] = useState(device.port)
   const [busy, setBusy] = useState(false)
+  const [open, setOpen] = useState(false)
+  const [confirmRemove, setConfirmRemove] = useState(false)
+  const [removing, setRemoving] = useState(false)
   const now = useNow()
 
   const live = device.on && device.online && server.conn === 'ready'
@@ -83,12 +95,53 @@ export default function DeviceRow({ server, device, disabled, onCommands }: Prop
     }
   }
 
+  const remove = async () => {
+    setConfirmRemove(false)
+    setLocalErr('')
+    setRemoving(true)
+    try {
+      await RemoveDevice(server.name, device.name)
+    } catch (e) {
+      const code = errorCode(e)
+      if (code === 'online') setLocalErr(t('devRemoveOnline', { name: device.name }))
+      else if (code === 'not_connected') setLocalErr(t('devRemoveNotConnected'))
+      else setLocalErr(errorDetail(e))
+    } finally {
+      setRemoving(false)
+    }
+  }
+
+  const unknown = t('devUnknown')
+  const system = [device.os ? osLabel(device.os, device.os_version) : '', device.arch].filter(Boolean).join(' · ')
+  const details: [string, string, boolean?][] = [
+    [t('devHost'), device.hostname || unknown],
+    [t('devSystem'), system || unknown],
+    [t('devTunnel'), device.tunnel_version || unknown],
+    device.online
+      ? [t('devStarted'), when(device.started_at) || unknown]
+      : [t('devLastSeen'), when(device.last_seen) || unknown],
+    [t('devId'), device.device_id || unknown, true],
+  ]
+  const detailId = `dev-detail-${server.name}-${device.name}`
+
   return (
     <div className={device.online ? 'item' : 'item offline'}>
       <div className="drow">
         <span className={device.online ? 'dot on' : 'dot off'} />
         <div className="grow">
-          <div className="name">{device.name}</div>
+          <button
+            type="button"
+            className={open ? 'name dname open' : 'name dname'}
+            aria-expanded={open}
+            aria-controls={detailId}
+            title={t('devDetails', { name: device.name })}
+            onClick={() => setOpen((o) => !o)}
+          >
+            {device.name}
+            <svg className="chev" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+              <path d="M3 2l3 3-3 3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
           <div className="meta" title={status}>
             {status}
           </div>
@@ -127,6 +180,48 @@ export default function DeviceRow({ server, device, disabled, onCommands }: Prop
         <div className="perr" role="alert">
           {errText}
         </div>
+      )}
+      {open && (
+        <div className="ddetail" id={detailId}>
+          <dl>
+            {details.map(([k, v, mono]) => (
+              <div key={k}>
+                <dt>{k}</dt>
+                <dd className={mono ? 'mono' : undefined}>{v}</dd>
+              </div>
+            ))}
+          </dl>
+          {!device.online && (
+            <button
+              type="button"
+              className="lb danger"
+              disabled={disabled || removing || server.conn !== 'ready'}
+              title={server.conn !== 'ready' ? t('devRemoveNotConnected') : undefined}
+              onClick={() => setConfirmRemove(true)}
+            >
+              {removing && <i className="spinner" />}
+              {t('devRemove')}
+            </button>
+          )}
+        </div>
+      )}
+      {confirmRemove && (
+        <Dialog
+          title={t('devRemoveTitle', { name: device.name })}
+          onCancel={() => setConfirmRemove(false)}
+          footer={
+            <>
+              <button type="button" className="btn plain" onClick={() => setConfirmRemove(false)}>
+                {t('cancel')}
+              </button>
+              <button type="button" className="btn dangerfill" onClick={() => void remove()}>
+                {t('del')}
+              </button>
+            </>
+          }
+        >
+          <p className="hint">{t('devRemoveBody')}</p>
+        </Dialog>
       )}
     </div>
   )

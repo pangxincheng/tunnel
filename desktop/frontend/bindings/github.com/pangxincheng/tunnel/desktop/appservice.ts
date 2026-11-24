@@ -68,6 +68,13 @@ export function Refresh(name: string): $CancellablePromise<void> {
     return $Call.ByID(1206700513, name);
 }
 
+/**
+ * RemoveDevice deletes an offline device's record from the server.
+ */
+export function RemoveDevice(server: string, device: string): $CancellablePromise<void> {
+    return $Call.ByID(1213343504, server, device);
+}
+
 export function Retry(name: string): $CancellablePromise<void> {
     return $Call.ByID(484400568, name);
 }
@@ -102,6 +109,22 @@ export function SetShareName(server: string, name: string): $CancellablePromise<
 
 export function SetShareSystem(server: string, on: boolean): $CancellablePromise<void> {
     return $Call.ByID(3180682176, server, on);
+}
+
+/**
+ * StartLog starts streaming the share service log of server (its last 1000
+ * lines, then new lines as they are written) as "share-log" events and
+ * returns the stream id. A stream already running for server is stopped.
+ */
+export function StartLog(server: string): $CancellablePromise<number> {
+    return $Call.ByID(291903256, server);
+}
+
+/**
+ * StopLog stops the stream id; unknown ids are ignored.
+ */
+export function StopLog(id: number): $CancellablePromise<void> {
+    return $Call.ByID(4292126808, id);
 }
 
 export function TestConnection(p: probe$0.Params): $CancellablePromise<$models.ProbeView> {

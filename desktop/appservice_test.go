@@ -34,6 +34,8 @@ func TestProbeErrorCodes(t *testing.T) {
 		{core.ErrDeviceOffline, "offline"},
 		{core.ErrPortBusy, "port_busy"},
 		{core.ErrForwardOn, "forward_on"},
+		{core.ErrDeviceOnline, "online"},
+		{tunnel.ErrNotConnected, "not_connected"},
 		{core.ErrNoSSHD, "no_sshd"},
 		{core.ErrNameTaken, "name_taken"},
 		{sharesvc.ErrCancelled, "cancelled"},

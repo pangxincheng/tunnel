@@ -22,6 +22,9 @@ export const {
   RetryShare,
   UpdateShare,
   OpenLog,
+  StartLog,
+  StopLog,
+  RemoveDevice,
   AddServer,
   UpdateServer,
   DeleteServer,
@@ -37,8 +40,21 @@ export function onState(cb: (s: AppState) => void): () => void {
   return Events.On('state', (ev) => cb(ev.data as AppState))
 }
 
+/** One piece of a share log stream (see StartLog); the last has done set. */
+export interface LogChunk {
+  id: number
+  data: string
+  done: boolean
+  err: string
+}
+
+/** Subscribes to share log chunks; returns the unsubscribe function. */
+export function onLog(cb: (c: LogChunk) => void): () => void {
+  return Events.On('share-log', (ev) => cb(ev.data as LogChunk))
+}
+
 const CODES = [
-  'offline', 'no_sshd', 'name_taken', 'cancelled', 'not_running', 'port_busy', 'port_invalid', 'port_conflict', 'forward_on', 'unknown',
+  'offline', 'no_sshd', 'name_taken', 'cancelled', 'not_running', 'port_busy', 'port_invalid', 'port_conflict', 'forward_on', 'online', 'not_connected', 'unknown',
   'passphrase', 'auth', 'dial', 'socketdir', 'autostart', 'journal', 'nolog',
 ]
 

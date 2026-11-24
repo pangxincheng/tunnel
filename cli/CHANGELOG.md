@@ -1,6 +1,8 @@
 # Changelog
 
 ## 2026-11-24
+- 新增 `RemoveOfflineDevice(ctx, sc, dir, name)` 与 `Session.RemoveOfflineDevice`:删除 VPS 上离线设备的记录(`<name>.json` 与残留的 `<name>.sock`),不论属于哪台设备;删除前重新探测 socket,在线则返回新哨兵错误 `ErrDeviceOnline`、什么都不删;名字经 `ValidateName` 校验(防路径穿越)。被删的设备下次连上服务器时会重新登记。桌面端的「删除设备」与自动清理用它。新增 `TestRemoveOfflineDevice`。
+- README「准备」一节建议在 VPS 的 sshd 加 `ClientAliveInterval 15` / `ClientAliveCountMax 4`:设备睡眠或换网络时不辞而别,旧会话要等 TCP 保活(Linux 默认约 2 小时 11 分钟)才被清掉,期间同一个 socket 有两个监听者(在测试 VPS 上实际观察到:Mac mini 约 21:15 断开后旧会话一直留着,22:24 重连的新会话已接管 socket 路径),不影响连接,但占着一个 sshd 进程。
 - 改为与桌面端同步发布:由统一的 `vX.Y.Z` tag(自 `v1.5.0` 起)经 `.github/workflows/release.yml` 构建 6 个平台的 `tunnel_<tag>_<os>_<arch>` 压缩包,版本号注入 tag 本身;工作流随后自动补 `cli/vX.Y.Z` 供 `go install`。README 徽章改指 `release.yml` 与 `v*` 版本。
 
 ## 2026-11-23

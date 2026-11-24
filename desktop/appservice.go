@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/pangxincheng/tunnel/desktop/internal/autostart"
@@ -64,7 +65,13 @@ type AppService struct {
 	exe   func() (string, error)
 	probe func(context.Context, probe.Params) (probe.Result, error)
 	open  func(path string) error
-	quit  func() // set by main
+	emit  func(name string, data any) // frontend events; set by main
+	quit  func()                      // set by main
+
+	ctx    context.Context // from ServiceStartup; parent of log streams
+	logMu  sync.Mutex
+	logs   map[string]logStream // running log stream per server
+	logSeq int
 }
 
 func newAppService(m *core.Manager) *AppService {
@@ -73,6 +80,7 @@ func newAppService(m *core.Manager) *AppService {
 
 func (s *AppService) ServiceStartup(ctx context.Context, _ application.ServiceOptions) error {
 	ctx, s.cancel = context.WithCancel(ctx)
+	s.ctx = ctx
 	s.mgr.Start(ctx)
 	return nil
 }
@@ -180,6 +188,11 @@ func (s *AppService) Quit() {
 	if s.quit != nil {
 		s.quit()
 	}
+}
+
+// RemoveDevice deletes an offline device's record from the server.
+func (s *AppService) RemoveDevice(server, device string) error {
+	return wrapErr(s.mgr.RemoveDevice(server, device))
 }
 
 // OpenLog opens the share service log of server in the system viewer.

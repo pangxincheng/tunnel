@@ -49,6 +49,10 @@ func errCode(err error) string {
 		return "port_busy"
 	case errors.Is(err, core.ErrForwardOn):
 		return "forward_on"
+	case errors.Is(err, core.ErrDeviceOnline):
+		return "online"
+	case errors.Is(err, tunnel.ErrNotConnected):
+		return "not_connected"
 	case errors.Is(err, core.ErrUnknownServer), errors.Is(err, core.ErrUnknownDevice):
 		return "unknown"
 	}

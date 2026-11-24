@@ -129,3 +129,52 @@ func TestDeviceJSONKeys(t *testing.T) {
 		t.Fatalf("不应出现 Online 键: %s", data)
 	}
 }
+
+func TestRemoveOfflineDevice(t *testing.T) {
+	_, client := dialTestServer(t)
+	dir := mkSockDir(t)
+	exists := func(name string) bool {
+		_, err := os.Stat(filepath.Join(dir, name))
+		return err == nil
+	}
+	// 离线:json 与残留 socket 都删除,不论属于哪台设备
+	if err := WriteDeviceInfo(client, dir, DeviceInfo{DeviceID: "other", Name: "old"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "old.sock"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveOfflineDevice(t.Context(), client, dir, "old"); err != nil {
+		t.Fatal(err)
+	}
+	if exists("old.json") || exists("old.sock") {
+		t.Fatal("离线设备的记录应被删除")
+	}
+	// 只有 json、没有 socket 也能删;都不存在不报错
+	if err := WriteDeviceInfo(client, dir, DeviceInfo{DeviceID: "x", Name: "nosock"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveOfflineDevice(t.Context(), client, dir, "nosock"); err != nil || exists("nosock.json") {
+		t.Fatalf("err=%v", err)
+	}
+	if err := RemoveOfflineDevice(t.Context(), client, dir, "gone"); err != nil {
+		t.Fatal(err)
+	}
+	// 在线:拒绝,什么都不删
+	if _, err := ReverseForwardUnix(dir, "live", startEchoServer(t))(client); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteDeviceInfo(client, dir, DeviceInfo{DeviceID: "y", Name: "live"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveOfflineDevice(t.Context(), client, dir, "live"); !errors.Is(err, ErrDeviceOnline) {
+		t.Fatalf("err=%v, want ErrDeviceOnline", err)
+	}
+	if !exists("live.json") || !exists("live.sock") {
+		t.Fatal("在线设备的记录不应被删")
+	}
+	// 非法名字(防路径穿越)
+	if err := RemoveOfflineDevice(t.Context(), client, dir, "../x"); err == nil {
+		t.Fatal("非法名字应报错")
+	}
+}

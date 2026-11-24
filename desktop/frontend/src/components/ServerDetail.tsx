@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { ServerView } from '../api'
+import type { ServerView, Settings } from '../api'
 import { t } from '../i18n'
 import Banner from './Banner'
 import ShareSection from './ShareSection'
@@ -10,9 +10,10 @@ interface Props {
   server: ServerView
   platform: string
   sshd: { running: boolean; port: number }
+  settings: Settings
 }
 
-export default function ServerDetail({ server, platform, sshd }: Props) {
+export default function ServerDetail({ server, platform, sshd, settings }: Props) {
   const [cmdsFor, setCmdsFor] = useState<string | null>(null)
   const disabled = server.conn === 'disconnected'
   const stale = server.conn === 'waiting' || server.conn === 'failed'
@@ -35,7 +36,7 @@ export default function ServerDetail({ server, platform, sshd }: Props) {
         <div className="col">
           <Banner server={server} />
           <div className={disabled ? 'body faded' : 'body'} aria-disabled={disabled || undefined}>
-            <ShareSection server={server} platform={platform} sshd={sshd} disabled={disabled} />
+            <ShareSection server={server} platform={platform} sshd={sshd} settings={settings} disabled={disabled} />
             <div className="sec">
               <div className="sec-head">
                 <span className="t">{t('connectOthers')}</span>

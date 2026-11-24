@@ -150,6 +150,22 @@ export default function SettingsDialog({ settings, onClose }: { settings: Settin
               />
             </div>
             <div className="frow">
+              <span className="lbl">
+                {t('autoClean')}
+                <small>{t('autoCleanHint')}</small>
+              </span>
+              <Seg
+                value={String(settings.auto_clean_days ?? 0)}
+                onPick={(v) => update({ auto_clean_days: Number(v) })}
+                options={[
+                  ['0', t('autoCleanOff')],
+                  ['7', t('durDay', { n: 7 })],
+                  ['30', t('durDay', { n: 30 })],
+                  ['90', t('durDay', { n: 90 })],
+                ]}
+              />
+            </div>
+            <div className="frow">
               <span className="lbl">{t('about')}</span>
               <span className="meta ver">{/^\d/.test(version) ? `v${version}` : version}</span>
             </div>

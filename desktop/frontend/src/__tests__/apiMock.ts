@@ -1,7 +1,7 @@
 import { vi } from 'vitest'
 import { act } from '@testing-library/react'
 
-const CODES = ['offline', 'no_sshd', 'name_taken', 'cancelled', 'not_running', 'port_busy', 'port_invalid', 'port_conflict', 'unknown', 'passphrase', 'auth', 'dial', 'socketdir']
+const CODES = ['online', 'not_connected', 'nolog', 'offline', 'no_sshd', 'name_taken', 'cancelled', 'not_running', 'port_busy', 'port_invalid', 'port_conflict', 'unknown', 'passphrase', 'auth', 'dial', 'socketdir']
 const msgOf = (e: unknown) => (e instanceof Error ? e.message : String(e))
 const codeOf = (m: string) => {
   const c = m.slice(0, Math.max(m.indexOf(':'), 0)).trim()
@@ -9,6 +9,7 @@ const codeOf = (m: string) => {
 }
 
 const handlers = new Set<(s: any) => void>()
+const logHandlers = new Set<(c: any) => void>()
 
 export const apiMock = {
   GetState: vi.fn(),
@@ -23,6 +24,15 @@ export const apiMock = {
   RetryShare: vi.fn(async (_s: string) => {}),
   UpdateShare: vi.fn(async (_s: string) => {}),
   OpenLog: vi.fn(async (_s: string) => {}),
+  StartLog: vi.fn(async (_s: string) => 1),
+  StopLog: vi.fn(async (_id: number) => {}),
+  RemoveDevice: vi.fn(async (_s: string, _d: string) => {}),
+  onLog: vi.fn((cb: (c: any) => void) => {
+    logHandlers.add(cb)
+    return () => {
+      logHandlers.delete(cb)
+    }
+  }),
   UpdateSettings: vi.fn(async (_s: any) => {}),
   AppVersion: vi.fn(async () => '0.1.0'),
   onState: vi.fn((cb: (s: any) => void) => {
@@ -54,8 +64,20 @@ export function pushState(s: unknown) {
   })
 }
 
+/** Delivers a share log chunk to every onLog subscriber. */
+export function pushLog(c: { id: number; data?: string; done?: boolean; err?: string }) {
+  act(() => {
+    logHandlers.forEach((h) => h({ data: '', done: false, err: '', ...c }))
+  })
+}
+
+export function logListenerCount() {
+  return logHandlers.size
+}
+
 export function resetApiMock() {
   handlers.clear()
+  logHandlers.clear()
   for (const v of Object.values(apiMock)) (v as any).mockClear?.()
   apiMock.AppVersion.mockImplementation(async () => '0.1.0')
   apiMock.AddServer.mockImplementation(async () => {})
@@ -63,4 +85,6 @@ export function resetApiMock() {
   apiMock.DeleteServer.mockImplementation(async () => {})
   apiMock.TestConnection.mockImplementation(async () => ({ fingerprint: '', host_key: '', socket_dir: '' }))
   apiMock.PickKeyFile.mockImplementation(async () => '')
+  apiMock.StartLog.mockImplementation(async () => 1)
+  apiMock.RemoveDevice.mockImplementation(async () => {})
 }

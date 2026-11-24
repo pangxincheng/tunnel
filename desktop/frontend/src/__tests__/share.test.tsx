@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { apiMock, resetApiMock } from './apiMock'
-import { server } from './fixtures'
+import { appState, server } from './fixtures'
 import { setLang } from '../i18n'
 import ShareSection from '../components/ShareSection'
 
@@ -13,7 +13,7 @@ const up = { running: true, port: 22 }
 function share(over: Record<string, any> = {}, platform = 'linux', sshd = up) {
   const sv = server()
   sv.share = { ...sv.share, ...over }
-  return render(<ShareSection server={sv} platform={platform} sshd={sshd} />)
+  return render(<ShareSection server={sv} platform={platform} sshd={sshd} settings={appState().settings} />)
 }
 
 describe('ShareSection', () => {
@@ -72,7 +72,8 @@ describe('ShareSection', () => {
     await u.click(screen.getByText('重试'))
     expect(apiMock.RetryShare).toHaveBeenCalledWith('home')
     await u.click(screen.getByText('查看日志'))
-    expect(apiMock.OpenLog).toHaveBeenCalledWith('home')
+    expect(await screen.findByRole('dialog', { name: '共享日志 · home' })).toBeTruthy()
+    expect(apiMock.StartLog).toHaveBeenCalledWith('home')
   })
 
   it('retry on a stopped service shows the not-running sentence', async () => {
@@ -90,15 +91,19 @@ describe('ShareSection', () => {
     expect(await screen.findByText('The sharing service is not running. Check the log.')).toBeTruthy()
   })
 
-  it('journal log error shows the command as copyable text; nolog shows the missing-file note', async () => {
+  it('view logs is offered while sharing and opens the log viewer', async () => {
     const u = userEvent.setup()
-    share({ on: true, phase: 'failed', err: 'x' })
-    apiMock.OpenLog.mockRejectedValueOnce(new Error('journal: journalctl --user -u tunnel-home -f'))
-    await u.click(screen.getByText('查看日志'))
-    expect(await screen.findByText('journalctl --user -u tunnel-home -f')).toBeTruthy()
-    apiMock.OpenLog.mockRejectedValueOnce(new Error('nolog: /x'))
-    await u.click(screen.getByText('查看日志'))
-    expect(await screen.findByText('日志文件还不存在')).toBeTruthy()
+    share({ on: true, phase: 'ready' })
+    await u.click(screen.getByRole('button', { name: '查看日志' }))
+    await u.click(await screen.findByRole('button', { name: '关闭' }))
+    expect(apiMock.StartLog).toHaveBeenCalledWith('home')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(apiMock.StopLog).toHaveBeenCalledWith(1)
+  })
+
+  it('no view logs while not sharing', () => {
+    share({ on: false })
+    expect(screen.queryByText('查看日志')).toBeNull()
   })
 
   it('sshd not running: hint per OS and switch disabled', () => {
@@ -196,16 +201,6 @@ describe('ShareSection', () => {
     expect(await screen.findByText('「nas」在 home 上已被另一台设备使用，换一个名字')).toBeTruthy()
     await u.type(input, '2')
     expect(screen.queryByText(/已被另一台设备使用/)).toBeNull()
-  })
-
-  it('copy shows 复制失败 without a clipboard API', async () => {
-    const u = userEvent.setup()
-    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
-    share({ on: true, phase: 'failed', err: 'x' })
-    apiMock.OpenLog.mockRejectedValueOnce(new Error('journal: journalctl -u x'))
-    await u.click(screen.getByText('查看日志'))
-    await u.click(await screen.findByText('复制'))
-    expect(await screen.findByText('复制失败')).toBeTruthy()
   })
 
   it('share switch calls SetShare without flipping itself', async () => {

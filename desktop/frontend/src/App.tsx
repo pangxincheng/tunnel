@@ -74,7 +74,7 @@ export default function App() {
       <Sidebar state={state} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} onSettings={() => setSettingsOpen(true)} />
       <section className="main">
         {state.platform === 'darwin' && !current && <div className="drag-strip" />}
-        {current ? <ServerDetail key={current.name} server={current} platform={state.platform} sshd={state.sshd} /> : <EmptyState onAdd={onAdd} />}
+        {current ? <ServerDetail key={current.name} server={current} platform={state.platform} sshd={state.sshd} settings={settings} /> : <EmptyState onAdd={onAdd} />}
       </section>
       {settingsOpen && <SettingsDialog settings={settings} onClose={() => setSettingsOpen(false)} />}
       {serverForm && <ServerDialog servers={servers} editing={serverForm.editing} onClose={() => setServerForm(null)} />}

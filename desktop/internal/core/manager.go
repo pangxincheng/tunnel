@@ -35,6 +35,7 @@ type Session interface {
 	AddForward(name string, port int) error
 	RemoveForward(name string)
 	Devices(ctx context.Context) ([]tunnel.Device, error)
+	RemoveOfflineDevice(ctx context.Context, name string) error
 }
 
 // ShareCtl controls the share service; *sharesvc.Service satisfies it.
@@ -81,6 +82,7 @@ var (
 	ErrNameTaken     = errors.New("share name is taken by another device")
 	ErrPortBusy      = errors.New("the local port is in use by another program")
 	ErrForwardOn     = errors.New("turn the forward off before changing its port")
+	ErrDeviceOnline  = tunnel.ErrDeviceOnline
 )
 
 const (

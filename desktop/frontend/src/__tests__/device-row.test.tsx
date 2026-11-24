@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { apiMock, resetApiMock } from './apiMock'
-import { device, server } from './fixtures'
+import { appState, device, server } from './fixtures'
 import { setLang } from '../i18n'
 import DeviceRow from '../components/DeviceRow'
 import ServerDetail from '../components/ServerDetail'
@@ -213,7 +213,7 @@ describe('ServerDetail devices and commands dialog', () => {
     const writeText = vi.fn(async () => {})
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
     const sv = server({ devices: [device({ name: 'nas', port: 5103, on: true })] })
-    render(<ServerDetail server={sv} platform="linux" sshd={{ running: true, port: 22 }} />)
+    render(<ServerDetail server={sv} platform="linux" sshd={{ running: true, port: 22 }} settings={appState().settings} />)
     await u.click(screen.getByRole('button', { name: /nas 的连接命令/ }))
     expect(screen.getByText('nas 的连接命令')).toBeTruthy()
     expect(screen.getByText('转发已打开，连接 127.0.0.1:5103 就是 nas')).toBeTruthy()
@@ -229,7 +229,7 @@ describe('ServerDetail devices and commands dialog', () => {
 
   it('disconnected server: content faded, aria-disabled, controls disabled', () => {
     const sv = server({ conn: 'disconnected', devices: [device({ name: 'nas' })] })
-    const { container } = render(<ServerDetail server={sv} platform="linux" sshd={{ running: true, port: 22 }} />)
+    const { container } = render(<ServerDetail server={sv} platform="linux" sshd={{ running: true, port: 22 }} settings={appState().settings} />)
     expect(container.querySelector('.body.faded')!.getAttribute('aria-disabled')).toBe('true')
     expect(screen.getByRole('switch', { name: '转发到 nas' }).hasAttribute('disabled')).toBe(true)
     expect(screen.getByRole('switch', { name: '共享这台电脑' }).hasAttribute('disabled')).toBe(true)
@@ -238,18 +238,18 @@ describe('ServerDetail devices and commands dialog', () => {
   it('a state update keeps the port editor and its focus (no remount)', async () => {
     const u = userEvent.setup()
     const sv = (n: number) => server({ devices: [device({ name: 'nas', port: 5102, last_seen: String(n) })] })
-    const view = render(<ServerDetail server={sv(1)} platform="linux" sshd={{ running: true, port: 22 }} />)
+    const view = render(<ServerDetail server={sv(1)} platform="linux" sshd={{ running: true, port: 22 }} settings={appState().settings} />)
     await u.click(screen.getByRole('button', { name: /5102/ }))
     const input = screen.getByLabelText('nas 的本机端口')
     await u.type(input, '1')
-    view.rerender(<ServerDetail server={sv(2)} platform="linux" sshd={{ running: true, port: 22 }} />)
+    view.rerender(<ServerDetail server={sv(2)} platform="linux" sshd={{ running: true, port: 22 }} settings={appState().settings} />)
     expect(screen.getByLabelText('nas 的本机端口')).toBe(input)
     expect(document.activeElement).toBe(input)
     expect((input as HTMLInputElement).value).toBe('51021')
   })
 
   it('keeps the same DOM node per device name when devices are reordered or inserted', () => {
-    const props = { platform: 'linux', sshd: { running: true, port: 22 } }
+    const props = { platform: 'linux', sshd: { running: true, port: 22 }, settings: appState().settings }
     const mk = (names: string[]) => server({ devices: names.map((n) => device({ name: n })) })
     const view = render(<ServerDetail server={mk(['a', 'b'])} {...props} />)
     const nodeOf = (n: string) => screen.getByText(n, { selector: '.name' }).closest('.item')
@@ -260,7 +260,7 @@ describe('ServerDetail devices and commands dialog', () => {
 
   it('closes the commands dialog when its device disappears and does not reopen it', async () => {
     const u = userEvent.setup()
-    const props = { platform: 'linux', sshd: { running: true, port: 22 } }
+    const props = { platform: 'linux', sshd: { running: true, port: 22 }, settings: appState().settings }
     const withDev = server({ devices: [device({ name: 'nas' })] })
     const view = render(<ServerDetail server={withDev} {...props} />)
     await u.click(screen.getByRole('button', { name: /nas 的连接命令/ }))
@@ -274,10 +274,86 @@ describe('ServerDetail devices and commands dialog', () => {
   it('copy shows 复制失败 when the clipboard API is missing', async () => {
     const u = userEvent.setup()
     Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
-    render(<ServerDetail server={server({ devices: [device({ name: 'nas' })] })} platform="linux" sshd={{ running: true, port: 22 }} />)
+    render(<ServerDetail server={server({ devices: [device({ name: 'nas' })] })} platform="linux" sshd={{ running: true, port: 22 }} settings={appState().settings} />)
     await u.click(screen.getByRole('button', { name: /nas 的连接命令/ }))
     await u.click(screen.getByRole('button', { name: '复制 ssh' }))
     expect(await screen.findByText('复制失败')).toBeTruthy()
     expect(screen.queryByText('已复制')).toBeNull()
+  })
+})
+
+describe('DeviceRow details and removal', () => {
+  beforeEach(() => {
+    resetApiMock()
+    setLang('zh')
+  })
+
+  it('the name toggles a details panel with the device metadata', async () => {
+    const u = userEvent.setup()
+    row({ hostname: 'nas.local', os: 'Linux', os_version: '24.04', arch: 'arm64', tunnel_version: 'v1.5.0', device_id: 'abc123' })
+    const name = screen.getByRole('button', { name: 'nas' })
+    expect(name.getAttribute('aria-expanded')).toBe('false')
+    await u.click(name)
+    expect(name.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByText('nas.local')).toBeTruthy()
+    expect(screen.getByText('Linux 24.04 · arm64')).toBeTruthy()
+    expect(screen.getByText('v1.5.0')).toBeTruthy()
+    expect(screen.getByText('abc123')).toBeTruthy()
+    expect(screen.getByText('本次上线')).toBeTruthy()
+    // online devices cannot be removed
+    expect(screen.queryByText('删除这台设备')).toBeNull()
+    await u.click(name)
+    expect(screen.queryByText('nas.local')).toBeNull()
+  })
+
+  it('missing metadata shows 未知; offline shows last seen', async () => {
+    const u = userEvent.setup()
+    row({ online: false, hostname: '', os: '', arch: '', tunnel_version: '', device_id: '', last_seen: '' })
+    await u.click(screen.getByRole('button', { name: 'nas' }))
+    expect(screen.getAllByText('未知').length).toBe(5)
+    expect(screen.getByText('最后在线')).toBeTruthy()
+  })
+
+  it('offline device: remove after confirming', async () => {
+    const u = userEvent.setup()
+    row({ online: false })
+    await u.click(screen.getByRole('button', { name: 'nas' }))
+    await u.click(screen.getByText('删除这台设备'))
+    expect(screen.getByRole('dialog', { name: '删除设备 nas？' })).toBeTruthy()
+    expect(apiMock.RemoveDevice).not.toHaveBeenCalled()
+    await u.click(screen.getByRole('button', { name: '删除' }))
+    expect(apiMock.RemoveDevice).toHaveBeenCalledWith('home', 'nas')
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('cancelling the confirmation removes nothing', async () => {
+    const u = userEvent.setup()
+    row({ online: false })
+    await u.click(screen.getByRole('button', { name: 'nas' }))
+    await u.click(screen.getByText('删除这台设备'))
+    await u.click(screen.getByRole('button', { name: '取消' }))
+    expect(apiMock.RemoveDevice).not.toHaveBeenCalled()
+  })
+
+  it('remove errors: came online, not connected', async () => {
+    const u = userEvent.setup()
+    row({ online: false })
+    await u.click(screen.getByRole('button', { name: 'nas' }))
+    apiMock.RemoveDevice.mockRejectedValueOnce(new Error('online: device is online'))
+    await u.click(screen.getByText('删除这台设备'))
+    await u.click(screen.getByRole('button', { name: '删除' }))
+    expect(await screen.findByText('nas 现在在线，不能删除')).toBeTruthy()
+    apiMock.RemoveDevice.mockRejectedValueOnce(new Error('not_connected: not connected'))
+    await u.click(screen.getByText('删除这台设备'))
+    await u.click(screen.getByRole('button', { name: '删除' }))
+    expect(await screen.findByText('连上服务器后才能删除设备')).toBeTruthy()
+  })
+
+  it('remove is disabled while the server is not ready', async () => {
+    const u = userEvent.setup()
+    const dev = device({ name: 'nas', online: false })
+    render(<DeviceRow server={server({ conn: 'waiting', devices: [dev] })} device={dev} onCommands={noop} />)
+    await u.click(screen.getByRole('button', { name: 'nas' }))
+    expect((screen.getByText('删除这台设备') as HTMLButtonElement).disabled).toBe(true)
   })
 })

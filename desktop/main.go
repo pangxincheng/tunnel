@@ -56,6 +56,7 @@ func main() {
 	})
 
 	appPtr.Store(app)
+	svc.emit = func(name string, data any) { app.Event.Emit(name, data) }
 
 	opts := application.WebviewWindowOptions{
 		Title:     "Tunnel",

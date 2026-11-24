@@ -51,7 +51,7 @@ export function appState(over: Partial<AppState> = {}): AppState {
   return {
     servers: [],
     selected: '',
-    settings: { mode: 'system', accent: 'green', lang: 'zh', launch_at_login: false, restore_forwards: true },
+    settings: { mode: 'system', accent: 'green', lang: 'zh', launch_at_login: false, restore_forwards: true, auto_clean_days: 0, log_font_size: 0 },
     platform: 'linux',
     sshd: { running: true, port: 22 },
     ...over,

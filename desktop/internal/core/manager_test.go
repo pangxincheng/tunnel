@@ -994,3 +994,104 @@ func TestWaitPersistsLastSeen(t *testing.T) {
 		t.Fatalf("last seen on disk %v want %v", ls, t2)
 	}
 }
+
+func TestRemoveDevice(t *testing.T) {
+	c := cfgWith(withForwards(srvCfg("home"), map[string]config.Forward{"old": {Port: 5200}}))
+	e := newEnv(t, c)
+	s := e.ready("home", dev("old", "id-old", false), dev("a", "id-a", true))
+	if err := e.m.RemoveDevice("home", "old"); err != nil {
+		t.Fatal(err)
+	}
+	if !contains(s.Calls(), "rmdev old") {
+		t.Fatalf("calls %v", s.Calls())
+	}
+	v := e.view("home")
+	if len(v.Devices) != 1 || v.Devices[0].Name != "a" {
+		t.Fatalf("devices %+v", v.Devices)
+	}
+	sc := e.cfgServer("home")
+	if _, ok := sc.Forwards["old"]; ok {
+		t.Fatal("forward of removed device kept")
+	}
+	if _, ok := sc.LastSeen["old"]; ok {
+		t.Fatal("last seen of removed device kept")
+	}
+	for _, d := range sc.Devices {
+		if d.Name == "old" {
+			t.Fatal("cached device list still has it")
+		}
+	}
+}
+
+func TestRemoveDeviceRejectsOnline(t *testing.T) {
+	e := newEnv(t, cfgWith(srvCfg("home")))
+	s := e.ready("home", dev("a", "id-a", true))
+	if err := e.m.RemoveDevice("home", "a"); !errors.Is(err, ErrDeviceOnline) {
+		t.Fatalf("err %v", err)
+	}
+	// Came back online after the last refresh: the server-side probe refuses.
+	s.setDevices(dev("b", "id-b", false))
+	e.refreshNow("home", s)
+	s.setDevices(dev("b", "id-b", true))
+	if err := e.m.RemoveDevice("home", "b"); !errors.Is(err, ErrDeviceOnline) {
+		t.Fatalf("err %v", err)
+	}
+	if len(e.view("home").Devices) != 1 {
+		t.Fatal("device dropped although the server refused")
+	}
+	if err := e.m.RemoveDevice("home", "nope"); !errors.Is(err, ErrUnknownDevice) {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestRemoveDeviceNeedsConnection(t *testing.T) {
+	c := cfgWith(srvCfg("home"))
+	c.Servers[0].Devices = []tunnel.DeviceInfo{{Name: "old", DeviceID: "id-old"}}
+	e := newEnv(t, c)
+	if err := e.m.RemoveDevice("home", "old"); !errors.Is(err, tunnel.ErrNotConnected) {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestAutoCleanOfflineDevices(t *testing.T) {
+	c := cfgWith(withForwards(srvCfg("home"), map[string]config.Forward{"kept": {Port: 5300, On: true}}))
+	c.Settings.AutoCleanDays = 30
+	old := t0.Add(-31 * 24 * time.Hour)
+	at := func(name string, started time.Time, online bool) tunnel.Device {
+		return tunnel.Device{DeviceInfo: tunnel.DeviceInfo{Name: name, DeviceID: "id-" + name, StartedAt: started}, Online: online}
+	}
+	e := newEnv(t, c)
+	s := e.ready("home",
+		at("stale", old, false),                 // offline > 30 days: removed
+		at("recent", t0.Add(-time.Hour), false), // offline briefly: kept
+		at("kept", old, false),                  // forward on: kept
+		at("unknown", time.Time{}, false),       // no time known: kept
+		at("live", old, true),                   // online: kept
+	)
+	e.waitView("home", "stale removed", func(v ServerView) bool {
+		for _, d := range v.Devices {
+			if d.Name == "stale" {
+				return false
+			}
+		}
+		return true
+	})
+	if n := len(e.view("home").Devices); n != 4 {
+		t.Fatalf("devices %+v", e.view("home").Devices)
+	}
+	for _, call := range s.Calls() {
+		if strings.HasPrefix(call, "rmdev ") && call != "rmdev stale" {
+			t.Fatalf("unexpected %s", call)
+		}
+	}
+}
+
+func TestAutoCleanOffByDefault(t *testing.T) {
+	e := newEnv(t, cfgWith(srvCfg("home")))
+	s := e.ready("home", tunnel.Device{DeviceInfo: tunnel.DeviceInfo{Name: "stale", DeviceID: "x",
+		StartedAt: t0.Add(-365 * 24 * time.Hour)}})
+	e.refreshNow("home", s)
+	if contains(s.Calls(), "rmdev stale") {
+		t.Fatal("auto clean ran while off")
+	}
+}
